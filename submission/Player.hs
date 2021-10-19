@@ -34,9 +34,16 @@ playCard upcard points info pid memo hand
 
 
     | otherwise = let
+        newMemo = deserialise memo
+        -- finalMemo = updateMemory (getNewCards upcard info hand newMemo) action newMemo
+        finalMemo = updateMemory (concat (playerInfoHand <$> info)) action newMemo
+        -- newMemo = case parse parseMemory <$> memo of
+        --     Just (Result _ m) -> show $ updateMemory (concat (playerInfoHand <$> info)) action m
+        --     Just e@(Error _) -> trace (show e) ""
+        --     Nothing -> show initMemory
         action = case getRank <$> upcard of
         -- Just Ace -> if length (read hand) <= 3 then (Insurance 50, "") else (Hit, "")
-            Nothing -> makeBid upcard points memo
+            Nothing -> makeBid upcard points newMemo
             Just Ace -> Insurance 50
             Just _ -> Hit
         -- newMemo = updateMemory 100 
@@ -47,14 +54,21 @@ playCard upcard points info pid memo hand
         --         _ -> Memory 100 [] []
         --             where )
         -- in (action, show newMemo)
-        newMemo = case parse parseMemory <$> memo of
-            Just (Result _ m) -> show $ updateMemory 100 (concat (playerInfoHand <$> info)) action m
-            Nothing -> show $ Memory 100 (zipWith CardFreq [Ace ..] (replicate 13 12)) []
-            Just e@(Error _) -> trace (show e) ""
-        in (action, newMemo)
+        in (action, show finalMemo)
 
-makeBid :: Maybe Card -> [PlayerPoints] -> Maybe String -> Action
-makeBid upcard points memo = Bid minBid
+deserialise :: Maybe String -> Memory
+deserialise memo = case parse parseMemory <$> memo of 
+    Just (Result _ m) -> m
+    Just (Error _) -> initMemory -- trace (Error "") ""
+    Nothing -> initMemory
+
+getNewCards :: Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
+getNewCards upcard info hand memo = undefined
+    
+
+makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
+makeBid _ _ _ = Bid maxBid
+-- makeBid upcard points memo = Bid minBid
 
 -- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
 -- <currBid> ::= <int>
@@ -74,6 +88,9 @@ instance Show Memory where
             show_ deckState,
             show_ lastActions]
 
+initMemory :: Memory
+initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) []
+
 parseMemory :: Parser Memory
 parseMemory = do
     bid <- parseInt
@@ -83,9 +100,10 @@ parseMemory = do
     actions <- parseList parseAction_
     pure $ Memory bid deck actions
 
-updateMemory :: Int -> [Card] -> Action -> Memory -> Memory
-updateMemory bid newCards newAction oldMemory = 
-    Memory bid (updateDeckState newCards (deckState oldMemory)) (newAction : lastActions oldMemory)
+updateMemory :: [Card] -> Action -> Memory -> Memory
+updateMemory newCards action oldMemo = case action of
+    Bid amt -> Memory amt (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo)
+    _ -> Memory (currBid oldMemo) (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo)
 
 
 -- <deckState> ::= "[" <cardFreqs> "]"
