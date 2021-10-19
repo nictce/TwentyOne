@@ -14,7 +14,6 @@ import Debug.Trace
 import Data.List
 import Parser.Instances
 import Data.Char
-import TwentyOne.Types
 import Text.ParserCombinators.ReadP (sepBy)
 
 traceIf :: Bool -> String -> p -> p
@@ -84,11 +83,19 @@ parseMemory = do
 
 updateMemory :: Int -> [Card] -> Action -> Memory -> Memory
 updateMemory bid newCards newAction oldMemory = 
-    Memory bid (updateFreq <$> newCards <*> deckState oldMemory) (newAction : lastActions oldMemory)
+    Memory bid (updateDeckState newCards (deckState oldMemory)) (newAction : lastActions oldMemory)
     -- Memory bid (map (updateFreq <$> newCards) (deckState oldMemory)) (newAction : lastActions oldMemory)
 
 updateFreq :: Card -> CardFreq -> CardFreq
 updateFreq card cardFreq = if getRank card == rank cardFreq then CardFreq (getRank card) (freq cardFreq - 1) else cardFreq
+
+-- update :: (a -> b -> b) -> [a] -> b -> b
+-- update f a b = foldr f b a
+updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
+updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
+
+-- updateFreq_ :: Card -> [CardFreq] -> [CardFreq]
+-- updateFreq_ card memo = map (\cf -> if getRank card == rank cf then CardFreq (getRank card) (freq cf - 1) else cf) memo
 
 -- updateFreq_ cardFreq = traverse (\card -> if getRank card == rank cardFreq then pure (freq cardFreq - 1) else cardFreq)
 -- updateFreq_ :: [CardFreq] -> [CardFreq]
