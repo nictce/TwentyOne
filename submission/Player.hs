@@ -23,38 +23,19 @@ traceIf False _ x = x
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    -- | traceIf (upcard == Nothing) "====================" False = undefined
-    -- | trace "***" False = undefined
-    -- | trace ("id: " ++ show pid ++ " points: " ++ show points) False = undefined
     | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
     | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
     | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
-    -- | trace ("upcard: " ++ show upcard ++ " hand: " ++ show hand ++ " memo: " ++ show memo) False = undefined
-    -- | trace ("newMemo: " ++ show ()) False = undefined
-
 
     | otherwise = let
         newMemo = deserialise memo
         finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action upcard newMemo
-        -- finalMemo = updateMemory (concat (playerInfoHand <$> info)) action newMemo
-        -- newMemo = case parse parseMemory <$> memo of
-        --     Just (Result _ m) -> show $ updateMemory (concat (playerInfoHand <$> info)) action m
-        --     Just e@(Error _) -> trace (show e) ""
-        --     Nothing -> show initMemory
         action = case getRank <$> upcard of
-        -- Just Ace -> if length (read hand) <= 3 then (Insurance 50, "") else (Hit, "")
             Nothing -> makeBid upcard points newMemo
             -- Just Ace -> Insurance 50
             Just _ -> Hit
-        -- newMemo = updateMemory 100 
-        --     (if length hand <= 2 then hand else [head hand]) 
-        --     action
-        --     (case parse parseMemory <$> memo of
-        --         Just (Result _ m) -> updateMemory 100 (concat (playerInfoHand <$> info)) action m
-        --         _ -> Memory 100 [] []
-        --             where )
-        -- in (action, show newMemo)
         in (action, show finalMemo)
+
 
 deserialise :: Maybe String -> Memory
 deserialise memo = case parse parseMemory <$> memo of
@@ -63,59 +44,25 @@ deserialise memo = case parse parseMemory <$> memo of
     Nothing -> initMemory
 
 getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
--- getNewCards upcard info hand memo = case hand of
---     -- first turn
---     [] -> concat (playerInfoHand <$> init info) ++ 
---         (if head (lastActions memo) == Hit then playerInfoHand (last info) else [])
---     -- >= first turn
---     _ -> case head (lastActions memo) of
---         Bid _ -> case upcard of
---             Just c -> [c] ++ concat (playerInfoHand <$> info) ++ hand
---             Nothing -> []
---         _ -> [head hand]
 getNewCards pid upcard info hand memo = let
-    -- _ = putStrLn "start of getNewCards"
     lastAction = head (lastActions memo)
-    -- _ = putStrLn ("lastAction: " ++ show lastAction)
     in case upcard of
-        -- first turn
-        -- Nothing -> concat (playerInfoHand <$> init info) ++ 
-        --     (if lastAction == Hit then playerInfoHand (last info) else [])
-        -- Nothing -> if lastAction == Hit then
-        --     concat (playerInfoHand <$> removeDealerUpcard (lastUpcard memo) (includePlayerHead pid info)) else
-        --     concat (playerInfoHand <$> removeDealerUpcard (lastUpcard memo) (filter ((pid /=) . _playerInfoId) info))
-
+        -- first turn (always remove dealer's previous upcard)
         Nothing -> removeDealerUpcard (lastUpcard memo) . concat $ (playerInfoHand <$>) $ if lastAction == Hit then
+            -- take player head if they hit (took a card) last round
             includePlayerHead pid info else
+            -- else dont include the player at all
             filter ((pid /=) . _playerInfoId) info
 
-
-
-        -- Nothing -> removeDealerUpcard upcard $ if lastAction == Hit then
-        --     -- take head to see the card that was hit last round
-        --     concat (playerInfoHand <$> includePlayerHead pid info) else
-        --     concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) info)
-
-
-
-            -- concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) hands)
-                -- where hands = removeDealerUpcard info
-                -- where hands = removeDealerUpcard upcard info
         Just c -> case lastAction of
-            -- second turn
-            Bid _ -> [c] ++ concat (playerInfoHand <$> info) ++ hand
+            -- second turn    !!! TODO: removes dealers hand - bug?
+            Bid _ -> [c] ++ concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) info) ++ hand
             -- >= second turn
             _ -> [head hand]
 
--- removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
--- removeDealerUpcard (Just upcard) info = filter (/= upcard) info
--- removeDealerUpcard Nothing info = info
 removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
 removeDealerUpcard upcard cards = case upcard of 
     (Just c) -> delete c cards
-    -- (Just c) -> let (hands, dhand) = filter' (("dealer" /=) . _playerInfoId) info
-    --     in hands ++ (delete c dhand)
-        -- in hands ++ init (init dhand) ++ [last dhand]
     Nothing -> cards
 
 includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
@@ -134,10 +81,7 @@ makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
 makeBid _ _ _ = Bid maxBid
 -- makeBid upcard points memo = Bid minBid
 
--- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
--- <currBid> ::= <int>
--- <int> ::= <digit> | <digit><int>
--- <digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+
 data Memory = Memory {
     currBid :: Int,
     deckState :: [CardFreq],
@@ -174,9 +118,6 @@ updateMemory newCards action upcard oldMemo = case action of
     _ -> Memory (currBid oldMemo) (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo) upcard
 
 
--- <deckState> ::= "[" <cardFreqs> "]"
--- <cardFreqs> ::= <cardFreq> | <cardFreq> "," <cardFreqs>
--- <cardFreq> ::= <rank> ":" <int> 
 data CardFreq = CardFreq {
     rank :: Rank,
     freq :: Int
@@ -200,14 +141,6 @@ updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
             | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
             | otherwise =  cardFreq
 
-
--- <lastActions> ::= "[" <actions> "]"
--- <actions> ::= <action> | <action> "," <actions>
--- <action> ::= "H" | "ST" | <doubleDown> | <split> | <bid> | <insurance>
--- <doubleDown> ::= "DD" <int>
--- <split> ::= "SP" <int>
--- <bid> ::= "B" <int>
--- <insurance> ::= "I" <int>
 
 parseAction_ :: Parser Action
 parseAction_ =  (stringTok "Hit" >> pure Hit) |||
@@ -323,27 +256,32 @@ parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
 --     Result r str -> foldr1 (\a v -> if show v == str then (pure v) else a) (Error (UnexpectedString s)) alist
 --     _ -> Error (UnexpectedString s)
 
-
-
 -- parseShow :: (Foldable t, Show a, Functor t) => t a -> Parser a
 -- parseShow alist = P $ \s -> case parse (stringTok s) s of
 --     Result r str -> foldr (\a v@(Result _ n) -> if show n == str then v else a) (Error (UnexpectedString s)) (Result r <$> alist)
---     _ -> Error (UnexpectedString s)
-    -- Error e -> Error e
-    -- let str = parse (stringTok s) s
-    -- in
-    --     foldr (\a v -> if show v == str then pure str else a) (Error (UnexpectedString str)) alist
-    -- str <- parse 
-
-    -- where str = parse (stringTok s) s
-    -- fl <- str << filter ((==str) . show) alist
-    -- pure fl
-
--- parseRanks :: Input -> ParseResult Rank
--- parseRanks = parse (parseShow [Ace])
 
 
 
 
+
+
+
+
+-- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
+-- <currBid> ::= <int>
+-- <int> ::= <digit> | <digit><int>
+-- <digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+
+-- <deckState> ::= "[" <cardFreqs> "]"
+-- <cardFreqs> ::= <cardFreq> | <cardFreq> "," <cardFreqs>
+-- <cardFreq> ::= <rank> ":" <int> 
+
+-- <lastActions> ::= "[" <actions> "]"
+-- <actions> ::= <action> | <action> "," <actions>
+-- <action> ::= "H" | "ST" | <doubleDown> | <split> | <bid> | <insurance>
+-- <doubleDown> ::= "DD" <int>
+-- <split> ::= "SP" <int>
+-- <bid> ::= "B" <int>
+-- <insurance> ::= "I" <int>
 
 
