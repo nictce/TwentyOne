@@ -36,9 +36,9 @@ playCard upcard points info pid memo hand
     | otherwise = let
         action = case getRank <$> upcard of
         -- Just Ace -> if length (read hand) <= 3 then (Insurance 50, "") else (Hit, "")
+            Nothing -> Bid minBid
             Just Ace -> Insurance 50
             Just _ -> Hit
-            Nothing -> Bid 100
         -- newMemo = updateMemory 100 
         --     (if length hand <= 2 then hand else [head hand]) 
         --     action
@@ -59,7 +59,6 @@ playCard upcard points info pid memo hand
 -- <currBid> ::= <int>
 -- <int> ::= <digit> | <digit><int>
 -- <digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
-
 data Memory = Memory {
     currBid :: Int,
     deckState :: [CardFreq],
@@ -87,16 +86,10 @@ updateMemory :: Int -> [Card] -> Action -> Memory -> Memory
 updateMemory bid newCards newAction oldMemory = 
     Memory bid (updateDeckState newCards (deckState oldMemory)) (newAction : lastActions oldMemory)
 
-updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
-updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
-    where updateFreq card cardFreq 
-            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
-            | otherwise =  cardFreq
 
 -- <deckState> ::= "[" <cardFreqs> "]"
 -- <cardFreqs> ::= <cardFreq> | <cardFreq> "," <cardFreqs>
 -- <cardFreq> ::= <rank> ":" <int> 
-
 data CardFreq = CardFreq {
     rank :: Rank,
     freq :: Int
@@ -126,6 +119,13 @@ parseRank = (stringTok "A" >> pure Ace) |||
     (stringTok "Q" >> pure Queen) ||| 
     (stringTok "K" >> pure King)
 
+updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
+updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
+    where updateFreq card cardFreq 
+            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
+            | otherwise =  cardFreq
+
+
 -- <lastActions> ::= "[" <actions> "]"
 -- <actions> ::= <action> | <action> "," <actions>
 -- <action> ::= "H" | "ST" | <doubleDown> | <split> | <bid> | <insurance>
@@ -142,6 +142,11 @@ parseAction_ =  (string "Hit" >> pure Hit) |||
     (string "Bid " >> parseInt >>= pure . Bid) |||
     (string "Insurance " >> parseInt >>= pure . Insurance)
 
+
+
+
+
+
 list :: Parser a -> Parser [a]
 list p = list1 p ||| pure []
 
@@ -153,11 +158,11 @@ satisfy f = do
   c <- character
   (if f c then pure else unexpectedCharParser) c
 
-isNot :: Char -> Parser Char
-isNot c = satisfy (/= c)
+-- isNot :: Char -> Parser Char
+-- isNot c = satisfy (/= c)
 
-digit :: Parser Char
-digit = satisfy isDigit
+-- digit :: Parser Char
+-- digit = satisfy isDigit
 
 space :: Parser Char
 space = satisfy isSpace
@@ -165,11 +170,11 @@ space = satisfy isSpace
 spaces :: Parser String
 spaces = list space
 
-sequenceParser :: [Parser a] -> Parser [a]
-sequenceParser = sequence
+-- sequenceParser :: [Parser a] -> Parser [a]
+-- sequenceParser = sequence
 
-thisMany :: Int -> Parser a -> Parser [a]
-thisMany n l = sequenceParser (replicate n l)
+-- thisMany :: Int -> Parser a -> Parser [a]
+-- thisMany n l = sequenceParser (replicate n l)
 
 string :: String -> Parser String
 string = traverse is
@@ -180,8 +185,8 @@ tok p = do
     _ <- spaces
     pure r
 
-charTok :: Char -> Parser Char
-charTok c = tok (is c)
+-- charTok :: Char -> Parser Char
+-- charTok c = tok (is c)
 
 commaTok :: Parser Char
 commaTok = tok (is ',')
@@ -198,11 +203,12 @@ sepby1 a s = do
         xs <- list $ s >> a
         pure (x:xs)
 
-oneof :: String -> Parser Char
-oneof s = satisfy (`elem` s)
+-- parse a character and see if it is part of the string s
+-- oneof :: String -> Parser Char
+-- oneof s = satisfy (`elem` s)
 
-noneof :: String -> Parser Char
-noneof s = satisfy (`notElem` s)
+-- noneof :: String -> Parser Char
+-- noneof s = satisfy (`notElem` s)
 
 parseInt :: Parser Int
 parseInt = P $ \s -> case readInt s of
