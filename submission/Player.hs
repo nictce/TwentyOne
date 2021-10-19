@@ -75,17 +75,11 @@ instance Show Memory where
 
 parseMemory :: Parser Memory
 parseMemory = do
-    -- _ <- stringTok "\\\""
     bid <- parseInt
     _ <- commaTok
-    _ <- stringTok "["
-    deck <- sepby parseCardFreq commaTok
-    _ <- stringTok "]"
+    deck <- parseList parseCardFreq
     _ <- commaTok
-    _ <- stringTok "["
-    actions <- sepby parseAction_ commaTok
-    _ <- stringTok "]"
-    -- _ <- stringTok "\\\""
+    actions <- parseList parseAction_
     pure $ Memory bid deck actions
 
 updateMemory :: Int -> [Card] -> Action -> Memory -> Memory
@@ -121,29 +115,17 @@ data CardFreq = CardFreq {
     freq :: Int
 }
 
+parseDeckState :: Parser [Int]
 parseDeckState = (sepby parseInt commaTok)
 
 instance Show CardFreq where
     show cf = show (rank cf) ++ ":" ++ show (freq cf)
 
-parseCardFreqs :: Parser [CardFreq]
-parseCardFreqs = ((:) <$> parseCardFreq <*> (commaTok >> parseCardFreqs)) ||| ((:[]) <$> parseCardFreq)
--- parseCardFreqs = do
---     _ <- commaTok
---     cf <- parseCardFreq
---     pure [cf]
-
 parseCardFreq :: Parser CardFreq
 parseCardFreq = do
     r <- parseRank
     _ <- stringTok ":"
-    CardFreq r <$> parseNumber
-
-
-parseNumber :: Parser Int
-parseNumber = P $ \s -> case readInt s of
-    Just (x,y) -> Result y x
-    Nothing -> Error $ UnexpectedString $ "Not an Number: " ++ s
+    CardFreq r <$> parseInt
 
 parseRank :: Parser Rank
 parseRank = (stringTok "A" >> pure Ace) ||| 
@@ -160,25 +142,6 @@ parseRank = (stringTok "A" >> pure Ace) |||
     (stringTok "Q" >> pure Queen) ||| 
     (stringTok "K" >> pure King)
 
--- parseRank :: Parser Rank
--- parseRank = P $ \s -> case parse character s of
---     Result r 'A' -> Result r Ace
---     Result r '2' -> Result r Two
---     Result r '3' -> Result r Three
---     Result r '4' -> Result r Four
---     Result r '5' -> Result r Five
---     Result r '6' -> Result r Six
---     Result r '7' -> Result r Seven
---     Result r '8' -> Result r Eight
---     Result r '9' -> Result r Nine
---     Result r 'T' -> Result r Ten
---     Result r 'J' -> Result r Jack
---     Result r 'Q' -> Result r Queen
---     Result r 'K' -> Result r King
---     Result _ x -> parse (unexpectedCharParser x) s
---     Error e -> Error e
-
-
 -- <lastActions> ::= "[" <actions> "]"
 -- <actions> ::= <action> | <action> "," <actions>
 -- <action> ::= "H" | "ST" | <doubleDown> | <split> | <bid> | <insurance>
@@ -187,19 +150,6 @@ parseRank = (stringTok "A" >> pure Ace) |||
 -- <bid> ::= "B" <int>
 -- <insurance> ::= "I" <int>
 
--- parseActions = sepby "," parseAction
-
--- parseAction = P $ \s -> case stringTok s of
---     Result r "H" ->
-
--- instance Show Action where
---     show Hit = "H"
---     show Stand = "ST"
---     show (DoubleDown pts) = "DD" ++ show pts
---     show (Split pts) = "SP" ++ show pts
---     show (Bid pts) = "B" ++ show pts
---     show (Insurance pts) = "I" ++ show pts
-
 parseAction_ :: Parser Action
 parseAction_ =  (string "Hit" >> pure Hit) |||
     (string "Stand" >> pure Stand) |||
@@ -207,16 +157,6 @@ parseAction_ =  (string "Hit" >> pure Hit) |||
     (string "Split " >> parseInt >>= pure . Split) |||
     (string "Bid " >> parseInt >>= pure . Bid) |||
     (string "Insurance " >> parseInt >>= pure . Insurance)
-
--- parseShow :: (Functor f, Show a) => f a -> f (Parser a)
--- parseShow = fmap $ (>>) . stringTok . show <*> pure
--- parseShow = fmap (((>>) . stringTok . show) <*> pure)
--- parseShow = fmap (((>>) . stringTok . show) <*> pure)
-
--- parseShow list shown = P $ \s -> 
-
--- deserialise = tok $ do 
---     currBid <- parseInt
 
 list :: Parser a -> Parser [a]
 list p = list1 p ||| pure []
@@ -280,19 +220,24 @@ oneof s = satisfy (`elem` s)
 noneof :: String -> Parser Char
 noneof s = satisfy (`notElem` s)
 
-
-
-
-parseNum :: Num a => (Input -> Maybe (a, Input)) -> Parser a
-parseNum f = tok $ P (\i -> case f i of
-    Just (a, s) -> Result s a
-    Nothing -> Error $ UnexpectedString i)
-
 parseInt :: Parser Int
--- parseInt = parseNum readInt
 parseInt = P $ \s -> case readInt s of
     Just (v, r) -> Result r v
     Nothing -> Error $UnexpectedString s
+    
+parseList :: Parser a -> Parser [a]
+parseList parser = do
+    _ <- stringTok "["
+    result <- sepby parser commaTok
+    _ <- stringTok "]"
+    pure result
+
+-- parseShow :: (Functor f, Show a) => f a -> f (Parser a)
+-- parseShow = fmap $ (>>) . stringTok . show <*> pure
+-- parseShow = fmap (((>>) . stringTok . show) <*> pure)
+-- parseShow = fmap (((>>) . stringTok . show) <*> pure)
+
+-- parseShow list shown = P $ \s -> 
 
 
 
