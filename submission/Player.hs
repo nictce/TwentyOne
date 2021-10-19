@@ -36,7 +36,7 @@ playCard upcard points info pid memo hand
     | otherwise = let
         action = case getRank <$> upcard of
         -- Just Ace -> if length (read hand) <= 3 then (Insurance 50, "") else (Hit, "")
-            Nothing -> Bid minBid
+            Nothing -> makeBid upcard points memo
             Just Ace -> Insurance 50
             Just _ -> Hit
         -- newMemo = updateMemory 100 
@@ -53,7 +53,8 @@ playCard upcard points info pid memo hand
             Just e@(Error _) -> trace (show e) ""
         in (action, newMemo)
 
-
+makeBid :: Maybe Card -> [PlayerPoints] -> Maybe String -> Action
+makeBid upcard points memo = Bid minBid
 
 -- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
 -- <currBid> ::= <int>
@@ -105,19 +106,20 @@ parseCardFreq = do
     CardFreq r <$> parseInt
 
 parseRank :: Parser Rank
-parseRank = (stringTok "A" >> pure Ace) ||| 
-    (stringTok "2" >> pure Two) ||| 
-    (stringTok "3" >> pure Three) ||| 
-    (stringTok "4" >> pure Four) ||| 
-    (stringTok "5" >> pure Five) ||| 
-    (stringTok "6" >> pure Six) ||| 
-    (stringTok "7" >> pure Seven) ||| 
-    (stringTok "8" >> pure Eight) ||| 
-    (stringTok "9" >> pure Nine) ||| 
-    (stringTok "T" >> pure Ten) ||| 
-    (stringTok "J" >> pure Jack) ||| 
-    (stringTok "Q" >> pure Queen) ||| 
-    (stringTok "K" >> pure King)
+parseRank = parseShow [Ace ..]
+-- parseRank = (stringTok "A" >> pure Ace) ||| 
+--     (stringTok "2" >> pure Two) ||| 
+--     (stringTok "3" >> pure Three) ||| 
+--     (stringTok "4" >> pure Four) ||| 
+--     (stringTok "5" >> pure Five) ||| 
+--     (stringTok "6" >> pure Six) ||| 
+--     (stringTok "7" >> pure Seven) ||| 
+--     (stringTok "8" >> pure Eight) ||| 
+--     (stringTok "9" >> pure Nine) ||| 
+--     (stringTok "T" >> pure Ten) ||| 
+--     (stringTok "J" >> pure Jack) ||| 
+--     (stringTok "Q" >> pure Queen) ||| 
+--     (stringTok "K" >> pure King)
 
 updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
 updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
@@ -227,7 +229,35 @@ parseList parser = do
 -- parseShow = fmap (((>>) . stringTok . show) <*> pure)
 -- parseShow = fmap (((>>) . stringTok . show) <*> pure)
 
--- parseShow list shown = P $ \s -> 
+parseShow_ :: Show b => b -> Parser b
+parseShow_ a = stringTok (show a) >> pure a
+
+parseShow :: (Foldable t, Functor t, Show a) => t a -> Parser a
+parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
+
+-- parseShow :: Show b => b -> Parser b
+-- parseShow alist = P $ \s -> case parse (stringTok s) s of
+--     Result r str -> foldr1 (\a v -> if show v == str then (pure v) else a) (Error (UnexpectedString s)) alist
+--     _ -> Error (UnexpectedString s)
+
+
+    
+-- parseShow :: (Foldable t, Show a, Functor t) => t a -> Parser a
+-- parseShow alist = P $ \s -> case parse (stringTok s) s of
+--     Result r str -> foldr (\a v@(Result _ n) -> if show n == str then v else a) (Error (UnexpectedString s)) (Result r <$> alist)
+--     _ -> Error (UnexpectedString s)
+    -- Error e -> Error e
+    -- let str = parse (stringTok s) s
+    -- in
+    --     foldr (\a v -> if show v == str then pure str else a) (Error (UnexpectedString str)) alist
+    -- str <- parse 
+    
+    -- where str = parse (stringTok s) s
+    -- fl <- str << filter ((==str) . show) alist
+    -- pure fl
+
+-- parseRanks :: Input -> ParseResult Rank
+-- parseRanks = parse (parseShow [Ace])
 
 
 
