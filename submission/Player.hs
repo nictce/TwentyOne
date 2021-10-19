@@ -61,7 +61,7 @@ getNewCards pid upcard info hand memo = let
             _ -> [head hand]
 
 removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
-removeDealerUpcard upcard cards = case upcard of 
+removeDealerUpcard upcard cards = case upcard of
     (Just c) -> delete c cards
     Nothing -> cards
 
@@ -89,6 +89,11 @@ data Memory = Memory {
     lastUpcard :: Maybe Card
 }
 
+data CardFreq = CardFreq {
+    rank :: Rank,
+    freq :: Int
+}
+
 instance Show Memory where
     show m = intercalate "," values where
         show_ f = show (f m)
@@ -97,6 +102,10 @@ instance Show Memory where
             show_ deckState,
             show_ lastActions,
             show_ lastUpcard]
+
+instance Show CardFreq where
+    show cf = show (rank cf) ++ ":" ++ show (freq cf)
+
 
 initMemory :: Memory
 initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand] Nothing
@@ -113,18 +122,23 @@ parseMemory = do
     pure $ Memory bid deck actions card
 
 updateMemory :: [Card] -> Action -> Maybe Card ->Memory -> Memory
-updateMemory newCards action upcard oldMemo = case action of
-    Bid amt -> Memory amt (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo) upcard
-    _ -> Memory (currBid oldMemo) (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo) upcard
+updateMemory newCards action upcard oldMemo = let
+    deckState_ = deckState oldMemo
+    lastActions_ = lastActions oldMemo
+    in case action of
+        Bid amt -> Memory amt (updateDeckState newCards deckState_) (action : lastActions_) upcard
+        _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
 
+updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
+updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCards)
+    where updateFreq card cardFreq
+            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
+            | otherwise =  cardFreq
 
-data CardFreq = CardFreq {
-    rank :: Rank,
-    freq :: Int
-}
+checkDeck :: [CardFreq] -> [CardFreq]
+checkDeck deckState = if all ((0 >=) . freq) deckState then 
+    map (\ v -> CardFreq (rank v) (freq v + 12)) deckState else deckState
 
-instance Show CardFreq where
-    show cf = show (rank cf) ++ ":" ++ show (freq cf)
 
 parseCardFreq :: Parser CardFreq
 parseCardFreq = do
@@ -134,13 +148,6 @@ parseCardFreq = do
 
 parseRank :: Parser Rank
 parseRank = parseShow [Ace ..]
-
-updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
-updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
-    where updateFreq card cardFreq
-            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
-            | otherwise =  cardFreq
-
 
 parseAction_ :: Parser Action
 parseAction_ =  (stringTok "Hit" >> pure Hit) |||
