@@ -26,16 +26,16 @@ playCard upcard points info pid memo hand
     -- | traceIf (upcard == Nothing) "====================" False = undefined
     -- | trace "***" False = undefined
     -- | trace ("id: " ++ show pid ++ " points: " ++ show points) False = undefined
-    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    | trace ("memo: " ++ show memo) False = undefined
+    | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
     -- | trace ("upcard: " ++ show upcard ++ " hand: " ++ show hand ++ " memo: " ++ show memo) False = undefined
     -- | trace ("newMemo: " ++ show ()) False = undefined
 
 
     | otherwise = let
         newMemo = deserialise memo
-        finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action newMemo
+        finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action upcard newMemo
         -- finalMemo = updateMemory (concat (playerInfoHand <$> info)) action newMemo
         -- newMemo = case parse parseMemory <$> memo of
         --     Just (Result _ m) -> show $ updateMemory (concat (playerInfoHand <$> info)) action m
@@ -44,7 +44,7 @@ playCard upcard points info pid memo hand
         action = case getRank <$> upcard of
         -- Just Ace -> if length (read hand) <= 3 then (Insurance 50, "") else (Hit, "")
             Nothing -> makeBid upcard points newMemo
-            Just Ace -> Insurance 50
+            -- Just Ace -> Insurance 50
             Just _ -> Hit
         -- newMemo = updateMemory 100 
         --     (if length hand <= 2 then hand else [head hand]) 
@@ -57,7 +57,7 @@ playCard upcard points info pid memo hand
         in (action, show finalMemo)
 
 deserialise :: Maybe String -> Memory
-deserialise memo = case parse parseMemory <$> memo of 
+deserialise memo = case parse parseMemory <$> memo of
     Just (Result _ m) -> m
     Just (Error _) -> initMemory -- trace (Error "") ""
     Nothing -> initMemory
@@ -73,7 +73,7 @@ getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card
 --             Just c -> [c] ++ concat (playerInfoHand <$> info) ++ hand
 --             Nothing -> []
 --         _ -> [head hand]
-getNewCards pid upcard info hand memo = let 
+getNewCards pid upcard info hand memo = let
     -- _ = putStrLn "start of getNewCards"
     lastAction = head (lastActions memo)
     -- _ = putStrLn ("lastAction: " ++ show lastAction)
@@ -81,23 +81,42 @@ getNewCards pid upcard info hand memo = let
         -- first turn
         -- Nothing -> concat (playerInfoHand <$> init info) ++ 
         --     (if lastAction == Hit then playerInfoHand (last info) else [])
-        Nothing -> if lastAction == Hit then 
-            -- take head to see the card that was hit last round
-            concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) hands) else 
+        -- Nothing -> if lastAction == Hit then
+        --     concat (playerInfoHand <$> removeDealerUpcard (lastUpcard memo) (includePlayerHead pid info)) else
+        --     concat (playerInfoHand <$> removeDealerUpcard (lastUpcard memo) (filter ((pid /=) . _playerInfoId) info))
+
+        Nothing -> removeDealerUpcard (lastUpcard memo) . concat $ (playerInfoHand <$>) $ if lastAction == Hit then
+            includePlayerHead pid info else
+            filter ((pid /=) . _playerInfoId) info
+
+
+
+        -- Nothing -> removeDealerUpcard upcard $ if lastAction == Hit then
+        --     -- take head to see the card that was hit last round
+        --     concat (playerInfoHand <$> includePlayerHead pid info) else
+        --     concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) info)
+
+
+
             -- concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) hands)
-            concat (playerInfoHand <$> includePlayerHead pid hands)
-                where hands = removeDealerUpcard info
+                -- where hands = removeDealerUpcard info
+                -- where hands = removeDealerUpcard upcard info
         Just c -> case lastAction of
             -- second turn
             Bid _ -> [c] ++ concat (playerInfoHand <$> info) ++ hand
             -- >= second turn
             _ -> [head hand]
 
-removeDealerUpcard :: [PlayerInfo] -> [PlayerInfo]
-removeDealerUpcard info = let
-    (hands, dhand) = filter' (("dealer" /=) . _playerInfoId) info
-    -- dealerHand = filter (("dealer" ==) . _playerInfoId) info
-        in hands ++ init (init dhand) ++ [last dhand]
+-- removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
+-- removeDealerUpcard (Just upcard) info = filter (/= upcard) info
+-- removeDealerUpcard Nothing info = info
+removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
+removeDealerUpcard upcard cards = case upcard of 
+    (Just c) -> delete c cards
+    -- (Just c) -> let (hands, dhand) = filter' (("dealer" /=) . _playerInfoId) info
+    --     in hands ++ (delete c dhand)
+        -- in hands ++ init (init dhand) ++ [last dhand]
+    Nothing -> cards
 
 includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
 includePlayerHead pid info = let
@@ -122,7 +141,8 @@ makeBid _ _ _ = Bid maxBid
 data Memory = Memory {
     currBid :: Int,
     deckState :: [CardFreq],
-    lastActions :: [Action]
+    lastActions :: [Action],
+    lastUpcard :: Maybe Card
 }
 
 instance Show Memory where
@@ -131,10 +151,11 @@ instance Show Memory where
         values = [
             show_ currBid,
             show_ deckState,
-            show_ lastActions]
+            show_ lastActions,
+            show_ lastUpcard]
 
 initMemory :: Memory
-initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand]
+initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand] Nothing
 
 parseMemory :: Parser Memory
 parseMemory = do
@@ -143,12 +164,14 @@ parseMemory = do
     deck <- parseList parseCardFreq
     _ <- commaTok
     actions <- parseList parseAction_
-    pure $ Memory bid deck actions
+    _ <- commaTok
+    card <- parseMaybeCard
+    pure $ Memory bid deck actions card
 
-updateMemory :: [Card] -> Action -> Memory -> Memory
-updateMemory newCards action oldMemo = case action of
-    Bid amt -> Memory amt (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo)
-    _ -> Memory (currBid oldMemo) (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo)
+updateMemory :: [Card] -> Action -> Maybe Card ->Memory -> Memory
+updateMemory newCards action upcard oldMemo = case action of
+    Bid amt -> Memory amt (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo) upcard
+    _ -> Memory (currBid oldMemo) (updateDeckState newCards (deckState oldMemo)) (action : lastActions oldMemo) upcard
 
 
 -- <deckState> ::= "[" <cardFreqs> "]"
@@ -170,23 +193,10 @@ parseCardFreq = do
 
 parseRank :: Parser Rank
 parseRank = parseShow [Ace ..]
--- parseRank = (stringTok "A" >> pure Ace) ||| 
---     (stringTok "2" >> pure Two) ||| 
---     (stringTok "3" >> pure Three) ||| 
---     (stringTok "4" >> pure Four) ||| 
---     (stringTok "5" >> pure Five) ||| 
---     (stringTok "6" >> pure Six) ||| 
---     (stringTok "7" >> pure Seven) ||| 
---     (stringTok "8" >> pure Eight) ||| 
---     (stringTok "9" >> pure Nine) ||| 
---     (stringTok "T" >> pure Ten) ||| 
---     (stringTok "J" >> pure Jack) ||| 
---     (stringTok "Q" >> pure Queen) ||| 
---     (stringTok "K" >> pure King)
 
 updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
 updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
-    where updateFreq card cardFreq 
+    where updateFreq card cardFreq
             | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
             | otherwise =  cardFreq
 
@@ -200,12 +210,22 @@ updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
 -- <insurance> ::= "I" <int>
 
 parseAction_ :: Parser Action
-parseAction_ =  (string "Hit" >> pure Hit) |||
-    (string "Stand" >> pure Stand) |||
-    (string "DoubleDown " >> parseInt >>= pure . DoubleDown) |||
-    (string "Split " >> parseInt >>= pure . Split) |||
-    (string "Bid " >> parseInt >>= pure . Bid) |||
-    (string "Insurance " >> parseInt >>= pure . Insurance)
+parseAction_ =  (stringTok "Hit" >> pure Hit) |||
+    (stringTok "Stand" >> pure Stand) |||
+    (stringTok "DoubleDown " >> parseInt >>= pure . DoubleDown) |||
+    (stringTok "Split " >> parseInt >>= pure . Split) |||
+    (stringTok "Bid " >> parseInt >>= pure . Bid) |||
+    (stringTok "Insurance " >> parseInt >>= pure . Insurance)
+
+parseCard :: Parser Card
+parseCard = do
+    suit <- parseShow [Spade ..]
+    Card suit <$> parseRank
+
+parseMaybeCard :: Parser (Maybe Card)
+parseMaybeCard = (stringTok "Just " >> pure <$> parseCard) ||| (stringTok "Nothing" >> pure Nothing)
+
+
 
 
 
@@ -279,7 +299,7 @@ parseInt :: Parser Int
 parseInt = P $ \s -> case readInt s of
     Just (v, r) -> Result r v
     Nothing -> Error $UnexpectedString s
-    
+
 parseList :: Parser a -> Parser [a]
 parseList parser = do
     _ <- stringTok "["
@@ -304,7 +324,7 @@ parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
 --     _ -> Error (UnexpectedString s)
 
 
-    
+
 -- parseShow :: (Foldable t, Show a, Functor t) => t a -> Parser a
 -- parseShow alist = P $ \s -> case parse (stringTok s) s of
 --     Result r str -> foldr (\a v@(Result _ n) -> if show n == str then v else a) (Error (UnexpectedString s)) (Result r <$> alist)
@@ -314,7 +334,7 @@ parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
     -- in
     --     foldr (\a v -> if show v == str then pure str else a) (Error (UnexpectedString str)) alist
     -- str <- parse 
-    
+
     -- where str = parse (stringTok s) s
     -- fl <- str << filter ((==str) . show) alist
     -- pure fl
