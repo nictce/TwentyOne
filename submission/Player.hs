@@ -24,7 +24,7 @@ traceIf False _ x = x
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
     -- | traceIf (upcard == Nothing) "====================" False = undefined
-    | trace "***" False = undefined
+    -- | trace "***" False = undefined
     -- | trace ("id: " ++ show pid ++ " points: " ++ show points) False = undefined
     | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
     | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
@@ -35,8 +35,8 @@ playCard upcard points info pid memo hand
 
     | otherwise = let
         newMemo = deserialise memo
-        -- finalMemo = updateMemory (getNewCards upcard info hand newMemo) action newMemo
-        finalMemo = updateMemory (concat (playerInfoHand <$> info)) action newMemo
+        finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action newMemo
+        -- finalMemo = updateMemory (concat (playerInfoHand <$> info)) action newMemo
         -- newMemo = case parse parseMemory <$> memo of
         --     Just (Result _ m) -> show $ updateMemory (concat (playerInfoHand <$> info)) action m
         --     Just e@(Error _) -> trace (show e) ""
@@ -62,9 +62,54 @@ deserialise memo = case parse parseMemory <$> memo of
     Just (Error _) -> initMemory -- trace (Error "") ""
     Nothing -> initMemory
 
-getNewCards :: Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
-getNewCards upcard info hand memo = undefined
-    
+getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
+-- getNewCards upcard info hand memo = case hand of
+--     -- first turn
+--     [] -> concat (playerInfoHand <$> init info) ++ 
+--         (if head (lastActions memo) == Hit then playerInfoHand (last info) else [])
+--     -- >= first turn
+--     _ -> case head (lastActions memo) of
+--         Bid _ -> case upcard of
+--             Just c -> [c] ++ concat (playerInfoHand <$> info) ++ hand
+--             Nothing -> []
+--         _ -> [head hand]
+getNewCards pid upcard info hand memo = let 
+    -- _ = putStrLn "start of getNewCards"
+    lastAction = head (lastActions memo)
+    -- _ = putStrLn ("lastAction: " ++ show lastAction)
+    in case upcard of
+        -- first turn
+        -- Nothing -> concat (playerInfoHand <$> init info) ++ 
+        --     (if lastAction == Hit then playerInfoHand (last info) else [])
+        Nothing -> if lastAction == Hit then 
+            -- take head to see the card that was hit last round
+            concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) hands) else 
+            -- concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) hands)
+            concat (playerInfoHand <$> includePlayerHead pid hands)
+                where hands = removeDealerUpcard info
+        Just c -> case lastAction of
+            -- second turn
+            Bid _ -> [c] ++ concat (playerInfoHand <$> info) ++ hand
+            -- >= second turn
+            _ -> [head hand]
+
+removeDealerUpcard :: [PlayerInfo] -> [PlayerInfo]
+removeDealerUpcard info = let
+    (hands, dhand) = filter' (("dealer" /=) . _playerInfoId) info
+    -- dealerHand = filter (("dealer" ==) . _playerInfoId) info
+        in hands ++ init (init dhand) ++ [last dhand]
+
+includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
+includePlayerHead pid info = let
+    (hands, phand) = filter' ((pid /=) . _playerInfoId) info in
+    hands ++ [head phand]
+
+-- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [])
+-- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [Stand])
+-- getNewCards Nothing [PlayerInfo "0" [Card Spade Two],PlayerInfo "3" [Card Spade Ace]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [Stand])
+
+filter' :: (a -> Bool) -> [a] -> ([a], [a])
+filter' f alist = (filter f alist, filter (not . f) alist)
 
 makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
 makeBid _ _ _ = Bid maxBid
@@ -89,7 +134,7 @@ instance Show Memory where
             show_ lastActions]
 
 initMemory :: Memory
-initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) []
+initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand]
 
 parseMemory :: Parser Memory
 parseMemory = do
