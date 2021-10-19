@@ -23,12 +23,14 @@ traceIf False _ x = x
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    | traceIf (upcard == Nothing) "====================" False = undefined
+    -- | traceIf (upcard == Nothing) "====================" False = undefined
     | trace "***" False = undefined
-    | trace ("id: " ++ show pid ++ " points: " ++ show points) False = undefined
-    | trace ("upcard: " ++ show upcard ++ " hand: " ++ show hand ++ " memo: " ++ show memo) False = undefined
-    | trace ("info: " ++ show info) False = undefined
-    | trace ("newMemo: " ++ show ()) False = undefined
+    -- | trace ("id: " ++ show pid ++ " points: " ++ show points) False = undefined
+    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    | trace ("memo: " ++ show memo) False = undefined
+    -- | trace ("upcard: " ++ show upcard ++ " hand: " ++ show hand ++ " memo: " ++ show memo) False = undefined
+    -- | trace ("newMemo: " ++ show ()) False = undefined
 
 
     | otherwise = let
@@ -84,46 +86,21 @@ parseMemory = do
 updateMemory :: Int -> [Card] -> Action -> Memory -> Memory
 updateMemory bid newCards newAction oldMemory = 
     Memory bid (updateDeckState newCards (deckState oldMemory)) (newAction : lastActions oldMemory)
-    -- Memory bid (map (updateFreq <$> newCards) (deckState oldMemory)) (newAction : lastActions oldMemory)
 
-updateFreq :: Card -> CardFreq -> CardFreq
-updateFreq card cardFreq = if getRank card == rank cardFreq then CardFreq (getRank card) (freq cardFreq - 1) else cardFreq
-
--- update :: (a -> b -> b) -> [a] -> b -> b
--- update f a b = foldr f b a
 updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
 updateDeckState newCards memo = foldr (map . updateFreq) memo newCards
-
--- updateFreq_ :: Card -> [CardFreq] -> [CardFreq]
--- updateFreq_ card memo = map (\cf -> if getRank card == rank cf then CardFreq (getRank card) (freq cf - 1) else cf) memo
-
--- updateFreq_ cardFreq = traverse (\card -> if getRank card == rank cardFreq then pure (freq cardFreq - 1) else cardFreq)
--- updateFreq_ :: [CardFreq] -> [CardFreq]
--- updateFreq_ cardFreq = foldr (\a v -> map (\x -> if rank v == rank x then CardFreq (rank x) (min (freq v) (freq x)) else v) a) []
--- updateFreq_ newCards oldMemory = foldr (\a v -> a) oldMemory
+    where updateFreq card cardFreq 
+            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
+            | otherwise =  cardFreq
 
 -- <deckState> ::= "[" <cardFreqs> "]"
 -- <cardFreqs> ::= <cardFreq> | <cardFreq> "," <cardFreqs>
 -- <cardFreq> ::= <rank> ":" <int> 
 
-data DeckState = DeckState {ace, two, three, four, five, six, seven, eight, nine, tens :: Int}
-    -- deriving (Show)
-
--- instance Show DeckState where
---     show d = "A" ++ show (ace d) ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace ++ "A" ++ show ace
-
-instance Show DeckState where
-    show m = intercalate "," values where
-        show_ f = show (f m)
-        values = show_ <$> [ace, two, three, four, five, six, seven, eight, nine, tens]
-
 data CardFreq = CardFreq {
     rank :: Rank,
     freq :: Int
 }
-
-parseDeckState :: Parser [Int]
-parseDeckState = (sepby parseInt commaTok)
 
 instance Show CardFreq where
     show cf = show (rank cf) ++ ":" ++ show (freq cf)
