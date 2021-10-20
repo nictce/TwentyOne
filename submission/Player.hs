@@ -56,7 +56,7 @@ getNewCards pid upcard info hand memo = let
 
         Just c -> case lastAction of
             -- second turn    !!! TODO: removes dealers hand - bug?
-            Bid _ -> [c] ++ concat (playerInfoHand <$> filter ((pid /=) . _playerInfoId) info) ++ hand
+            Bid _ -> [c] ++ concat (playerInfoHand <$> filter (("dealer" /=) . _playerInfoId) info) ++ hand
             -- >= second turn
             _ -> [head hand]
 
