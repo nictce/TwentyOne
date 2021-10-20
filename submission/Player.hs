@@ -68,7 +68,7 @@ removeDealerUpcard upcard cards = case upcard of
 includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
 includePlayerHead pid info = let
     (hands, phand) = filter' ((pid /=) . _playerInfoId) info in
-    hands ++ [head phand]
+    hands ++ [PlayerInfo pid [head (playerInfoHand (head phand))]]
 
 -- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [])
 -- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [Stand])
