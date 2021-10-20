@@ -56,10 +56,11 @@ playCard upcard points info pid memo hand
     | otherwise = let
         newMemo = deserialise memo
         finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action upcard newMemo
-        action = case getRank <$> upcard of
-            Nothing -> makeBid upcard points newMemo
+        -- action = decideAction upcard points hand finalMemo
+        action = case upcard of
+            Nothing -> makeBid points newMemo
             -- Just Ace -> Insurance 50
-            Just _ -> Hit
+            Just c -> decideAction c hand finalMemo
         in (action, show finalMemo)
 
 
@@ -67,22 +68,59 @@ playCard upcard points info pid memo hand
 Bidding & Actions?
 ---------------------------------}
 
-makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
-makeBid _ _ _ = Bid maxBid
+makeBid :: [PlayerPoints] -> Memory -> Action
+makeBid _ _ = Bid maxBid
 -- makeBid upcard points memo = Bid minBid
 
-decideAction :: Maybe Card -> [PlayerPoints] -> Memory -> Action
-decideAction _ _ _ = undefined
+decideAction :: Card -> [Card] -> Memory -> Action
+-- decideAction upcard points hand memo = case upcard of
+--     Just c@(Card _ Ace) -> if probValue 10 (deckState memo) > 0.667 then Insurance (maxBid `div` 2) else playHand c hand memo
+--     Just c -> playHand c hand memo
+--     Nothing -> makeBid points memo
+decideAction upcard hand memo = case lastActions memo of
+    (Bid _):_ -> decide2nd upcard hand memo
+    (DoubleDown _):_ -> Hit
+    _:(DoubleDown _):_ -> Stand
+    _ -> playHand upcard hand memo
+
+decide2nd :: Card -> [Card] -> Memory -> Action
+decide2nd upcard hand memo 
+    -- Insurance
+    | getRank upcard == Ace = if probValue 10 (deckState memo) > 0.667 then Insurance (bid `div` 2) else playHand upcard hand memo
+    -- Split
+    | getRank (head hand) == getRank (head (tail hand)) && 
+      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
+    -- Double
+    | handCalc hand <= 11 = DoubleDown (2 * bid)
+
+    | otherwise = playHand upcard hand memo
+    where bid = currBid memo
+
+-- Hit Stand DoubleDown Split
+playHand :: Card -> [Card] -> Memory -> Action
+playHand upcard hand memo
+    | diff > 0 = Hit
+    | diff == 0 = Stand
+    | diff < 0 = Stand
+    | otherwise = Stand
+    where 
+        p = probValueBelow (21 - handCalc hand) (deckState memo)
+        d = probValueBelow (21 - handCalc [upcard]) (deckState memo)
+        diff = p - d
+     
+    -- in case diff of
+    --     0 -> Hit 
+    --     1 -> Stand
 
 -- calculates the probability of the dealer's hidden card (below 17?)
-dlrHcProb :: [CardFreq] -> Int -> Int -> Float
-dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
-    probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
-    probValueBelow upcardVal deckState
+-- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
+-- dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
+--     probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
+--     probValueBelow upcardVal deckState
 
 -- finds whether the dealer's hidden card is from a new deck
-dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
-dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
+-- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
+-- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
 
 probWin :: [Card] -> Card -> [CardFreq] -> Float
 probWin hand _ deckState = let
@@ -94,8 +132,11 @@ probWin hand _ deckState = let
 probValueBelow :: Fractional a => Int -> [CardFreq] -> a
 probValueBelow val deckState = fromIntegral (cardsBelow (targetValue - val) deckState) / fromIntegral (totalCards deckState)
 
+probValue :: Fractional a => Int -> [CardFreq] -> a
+probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
+
 cardsBelow :: Int -> [CardFreq] -> Int
-cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + rankValue (rank v) else a) 0
+cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
 
 totalCards :: [CardFreq] -> Int
 totalCards = foldr (\v a -> a + freq v) 0
