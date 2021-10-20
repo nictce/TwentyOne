@@ -16,9 +16,36 @@ import Parser.Instances
 import Data.Char
 import Text.ParserCombinators.ReadP (sepBy)
 
-traceIf :: Bool -> String -> p -> p
-traceIf True  s x = trace s x
-traceIf False _ x = x
+
+{---------------------------------
+Declarations
+---------------------------------}
+
+data Memory = Memory {
+    currBid :: Int,
+    deckState :: [CardFreq],
+    lastActions :: [Action],
+    lastUpcard :: Maybe Card
+}
+
+data CardFreq = CardFreq {
+    rank :: Rank,
+    freq :: Int
+}
+
+instance Show Memory where
+    show m = intercalate "," values where
+        show_ f = show (f m)
+        values = [
+            show_ currBid,
+            show_ deckState,
+            show_ lastActions,
+            show_ lastUpcard]
+
+instance Show CardFreq where
+    show cf = show (rank cf) ++ ":" ++ show (freq cf)
+
+
 
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
@@ -37,11 +64,35 @@ playCard upcard points info pid memo hand
         in (action, show finalMemo)
 
 
+{---------------------------------
+Memory Maintainance
+---------------------------------}
+
 deserialise :: Maybe String -> Memory
 deserialise memo = case parse parseMemory <$> memo of
     Just (Result _ m) -> m
     Just (Error _) -> initMemory -- trace (Error "") ""
     Nothing -> initMemory
+
+updateMemory :: [Card] -> Action -> Maybe Card ->Memory -> Memory
+updateMemory newCards action upcard oldMemo = let
+    deckState_ = deckState oldMemo
+    lastActions_ = lastActions oldMemo
+    in case action of
+        Bid amt -> Memory amt (updateDeckState newCards deckState_) [action] upcard
+        _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
+
+updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
+updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCards)
+    where updateFreq card cardFreq
+            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
+            | otherwise =  cardFreq
+
+checkDeck :: [CardFreq] -> [CardFreq]
+-- if all cards reach 0 or any cards reach negative, the deck is replenished
+checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >=) . freq) deckState then 
+    map (\ v -> CardFreq (rank v) (freq v + 12)) deckState else deckState
+
 
 getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
 getNewCards pid upcard info hand memo = let
@@ -70,45 +121,37 @@ includePlayerHead pid info = let
     (hands, phand) = filter' ((pid /=) . _playerInfoId) info in
     hands ++ [PlayerInfo pid [head (playerInfoHand (head phand))]]
 
--- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [])
--- getNewCards (Just (Card Heart Ace)) [PlayerInfo "0" [Card Spade Two]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [Stand])
--- getNewCards Nothing [PlayerInfo "0" [Card Spade Two],PlayerInfo "3" [Card Spade Ace]] [Card Spade Three] (Memory 100 [CardFreq Ace 10, CardFreq Two 10, CardFreq Three 10] [Stand])
 
-filter' :: (a -> Bool) -> [a] -> ([a], [a])
-filter' f alist = (filter f alist, filter (not . f) alist)
+{---------------------------------
+Bidding & Actions?
+---------------------------------}
 
 makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
 makeBid _ _ _ = Bid maxBid
 -- makeBid upcard points memo = Bid minBid
 
 
-data Memory = Memory {
-    currBid :: Int,
-    deckState :: [CardFreq],
-    lastActions :: [Action],
-    lastUpcard :: Maybe Card
-}
 
-data CardFreq = CardFreq {
-    rank :: Rank,
-    freq :: Int
-}
 
-instance Show Memory where
-    show m = intercalate "," values where
-        show_ f = show (f m)
-        values = [
-            show_ currBid,
-            show_ deckState,
-            show_ lastActions,
-            show_ lastUpcard]
-
-instance Show CardFreq where
-    show cf = show (rank cf) ++ ":" ++ show (freq cf)
-
+{---------------------------------
+Utility
+---------------------------------}
 
 initMemory :: Memory
 initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand] Nothing
+
+traceIf :: Bool -> String -> p -> p
+traceIf True  s x = trace s x
+traceIf False _ x = x
+
+filter' :: (a -> Bool) -> [a] -> ([a], [a])
+filter' f alist = (filter f alist, filter (not . f) alist)
+
+
+
+{---------------------------------
+Parsers
+---------------------------------}
 
 parseMemory :: Parser Memory
 parseMemory = do
@@ -120,25 +163,6 @@ parseMemory = do
     _ <- commaTok
     card <- parseMaybeCard
     pure $ Memory bid deck actions card
-
-updateMemory :: [Card] -> Action -> Maybe Card ->Memory -> Memory
-updateMemory newCards action upcard oldMemo = let
-    deckState_ = deckState oldMemo
-    lastActions_ = lastActions oldMemo
-    in case action of
-        Bid amt -> Memory amt (updateDeckState newCards deckState_) (action : lastActions_) upcard
-        _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
-
-updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
-updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCards)
-    where updateFreq card cardFreq
-            | getRank card == rank cardFreq = CardFreq (getRank card) (freq cardFreq - 1)
-            | otherwise =  cardFreq
-
-checkDeck :: [CardFreq] -> [CardFreq]
-checkDeck deckState = if all ((0 >=) . freq) deckState then 
-    map (\ v -> CardFreq (rank v) (freq v + 12)) deckState else deckState
-
 
 parseCardFreq :: Parser CardFreq
 parseCardFreq = do
@@ -170,7 +194,9 @@ parseMaybeCard = (stringTok "Just " >> pure <$> parseCard) ||| (stringTok "Nothi
 
 
 
-
+{---------------------------------
+Parser Utility
+---------------------------------}
 
 list :: Parser a -> Parser [a]
 list p = list1 p ||| pure []
@@ -272,7 +298,9 @@ parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
 
 
 
-
+{---------------------------------
+BNF CFG
+---------------------------------}
 
 -- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
 -- <currBid> ::= <int>
