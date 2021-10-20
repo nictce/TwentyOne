@@ -14,7 +14,6 @@ import Debug.Trace
 import Data.List
 import Parser.Instances
 import Data.Char
-import Text.ParserCombinators.ReadP (sepBy)
 
 
 {---------------------------------
@@ -75,6 +74,38 @@ makeBid _ _ _ = Bid maxBid
 decideAction :: Maybe Card -> [PlayerPoints] -> Memory -> Action
 decideAction _ _ _ = undefined
 
+-- calculates the probability of the dealer's hidden card (below 17?)
+dlrHcProb :: [CardFreq] -> Int -> Int -> Float
+dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
+    probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
+    probValueBelow upcardVal deckState
+
+-- finds whether the dealer's hidden card is from a new deck
+dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
+dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
+
+probWin :: [Card] -> Card -> [CardFreq] -> Float
+probWin hand upcard deckState = let
+    p = handCalc hand
+    d = handCalc [upcard]
+    -- probPNotBust = 
+    in probValueBelow p deckState
+
+probValueBelow :: Fractional a => Int -> [CardFreq] -> a
+probValueBelow val deckState = fromIntegral (cardsBelow (targetValue - val) deckState) / fromIntegral (totalCards deckState)
+
+cardsBelow :: Int -> [CardFreq] -> Int
+cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + rankValue (rank v) else a) 0
+
+totalCards :: [CardFreq] -> Int
+totalCards = foldr (\v a -> a + freq v) 0
+
+rankValue :: Rank -> Int
+rankValue rank
+    -- | rank == Ace = 11
+    | rank < Jack = fromEnum rank + 1
+    | otherwise   = 10
+
 
 {---------------------------------
 Memory Maintainance
@@ -102,7 +133,7 @@ updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCard
 
 checkDeck :: [CardFreq] -> [CardFreq]
 -- if all cards reach 0 or any cards reach negative, the deck is replenished
-checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >) . freq) deckState then 
+checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >) . freq) deckState then
     map (\ v -> CardFreq (rank v) (freq v + numRanks)) deckState else deckState
 
 
