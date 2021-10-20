@@ -65,6 +65,18 @@ playCard upcard points info pid memo hand
 
 
 {---------------------------------
+Bidding & Actions?
+---------------------------------}
+
+makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
+makeBid _ _ _ = Bid maxBid
+-- makeBid upcard points memo = Bid minBid
+
+decideAction :: Maybe Card -> [PlayerPoints] -> Memory -> Action
+decideAction _ _ _ = undefined
+
+
+{---------------------------------
 Memory Maintainance
 ---------------------------------}
 
@@ -74,7 +86,7 @@ deserialise memo = case parse parseMemory <$> memo of
     Just (Error _) -> initMemory -- trace (Error "") ""
     Nothing -> initMemory
 
-updateMemory :: [Card] -> Action -> Maybe Card ->Memory -> Memory
+updateMemory :: [Card] -> Action -> Maybe Card -> Memory -> Memory
 updateMemory newCards action upcard oldMemo = let
     deckState_ = deckState oldMemo
     lastActions_ = lastActions oldMemo
@@ -90,8 +102,8 @@ updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCard
 
 checkDeck :: [CardFreq] -> [CardFreq]
 -- if all cards reach 0 or any cards reach negative, the deck is replenished
-checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >=) . freq) deckState then 
-    map (\ v -> CardFreq (rank v) (freq v + 12)) deckState else deckState
+checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >) . freq) deckState then 
+    map (\ v -> CardFreq (rank v) (freq v + numRanks)) deckState else deckState
 
 
 getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
@@ -122,15 +134,6 @@ includePlayerHead pid info = let
     hands ++ [PlayerInfo pid [head (playerInfoHand (head phand))]]
 
 
-{---------------------------------
-Bidding & Actions?
----------------------------------}
-
-makeBid :: Maybe Card -> [PlayerPoints] -> Memory -> Action
-makeBid _ _ _ = Bid maxBid
--- makeBid upcard points memo = Bid minBid
-
-
 
 
 {---------------------------------
@@ -138,7 +141,7 @@ Utility
 ---------------------------------}
 
 initMemory :: Memory
-initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 12)) [Stand] Nothing
+initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 (numRanks))) [Stand] Nothing
 
 traceIf :: Bool -> String -> p -> p
 traceIf True  s x = trace s x
@@ -146,6 +149,9 @@ traceIf False _ x = x
 
 filter' :: (a -> Bool) -> [a] -> ([a], [a])
 filter' f alist = (filter f alist, filter (not . f) alist)
+
+numRanks :: Int
+numRanks = numDecks *4
 
 
 
