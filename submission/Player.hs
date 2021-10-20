@@ -85,9 +85,9 @@ dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dea
 dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
 
 probWin :: [Card] -> Card -> [CardFreq] -> Float
-probWin hand upcard deckState = let
+probWin hand _ deckState = let
     p = handCalc hand
-    d = handCalc [upcard]
+    -- d = handCalc [upcard]
     -- probPNotBust = 
     in probValueBelow p deckState
 
@@ -102,7 +102,7 @@ totalCards = foldr (\v a -> a + freq v) 0
 
 rankValue :: Rank -> Int
 rankValue rank
-    -- | rank == Ace = 11
+    --  rank == Ace = 11
     | rank < Jack = fromEnum rank + 1
     | otherwise   = 10
 
