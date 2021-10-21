@@ -49,19 +49,34 @@ instance Show CardFreq where
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
     | otherwise = let
-        newMemo = deserialise memo
-        finalMemo = updateMemory (getNewCards pid upcard info hand newMemo) action upcard newMemo
-        -- action = decideAction upcard points hand finalMemo
+        newMemo = updateMemoryInfo (getNewCards pid upcard info hand newMemo) upcard (deserialise memo)
         action = case upcard of
             Nothing -> makeBid points newMemo
-            -- Just Ace -> Insurance 50
-            Just c -> decideAction c hand finalMemo
+            Just c -> decideAction c hand newMemo
+            --  case take 2 $ lastActions finalMemo of
+            --     [Bid _] -> Hit 
+            --     [DoubleDown _, Bid _] -> Hit
+            --     [Hit, DoubleDown _] -> Stand
+            --     _ -> Hit 
+        finalMemo = updateMemoryAction action newMemo
         in (action, show finalMemo)
+
+
+        -- action = decideAction upcard points hand finalMemo
+                -- case head (lastActions finalMemo) of
+                -- (Bid _) -> Hit -- decide2nd upcard hand memo
+                -- (DoubleDown _) -> Hit
+                -- -- [Hit, DoubleDown _, Bid _] -> Stand
+                -- _ -> Hit -- playHand upcard hand memo
+            -- Just Ace -> Insurance 50
+            -- Just c -> trace ("decideAction " ++ show upcard ++ show hand ++ show memo) decideAction c hand finalMemo
+
+-- playCard (Just (Card Heart Nine)) [PlayerPoints "0" 900, PlayerPoints "2" 800] [PlayerInfo "2" [],PlayerInfo "0" []] "0" (Just "100,[A:12,2:12,3:12,4:12,5:12,6:12,7:12,8:12,9:12,T:12,J:12,Q:12,K:12],[Bid 100],Nothing") [Card Spade Ace, Card Heart Two]
 
 
 {---------------------------------
@@ -70,28 +85,31 @@ Bidding & Actions?
 
 makeBid :: [PlayerPoints] -> Memory -> Action
 makeBid _ _ = Bid maxBid
--- makeBid upcard points memo = Bid minBid
 
 decideAction :: Card -> [Card] -> Memory -> Action
--- decideAction upcard points hand memo = case upcard of
---     Just c@(Card _ Ace) -> if probValue 10 (deckState memo) > 0.667 then Insurance (maxBid `div` 2) else playHand c hand memo
---     Just c -> playHand c hand memo
---     Nothing -> makeBid points memo
-decideAction upcard hand memo = case lastActions memo of
-    (Bid _):_ -> decide2nd upcard hand memo
-    (DoubleDown _):_ -> Hit
-    _:(DoubleDown _):_ -> Stand
+decideAction upcard hand memo = case trace ("decideAction " ++ show upcard ++ show hand ++ show memo) lastActions memo of
+    [Bid _] -> decide2nd upcard hand memo
+    [DoubleDown _, Bid _] -> Hit
+    [Hit, DoubleDown _, Bid _] -> Stand
     _ -> playHand upcard hand memo
+-- decideAction upcard hand memo = case trace ("decideAction " ++ show upcard ++ show hand ++ show memo) lastActions memo of
+--     [Bid 100] -> Hit -- decide2nd upcard hand memo
+--     [DoubleDown 100, Bid 100] -> Hit
+--     [Hit, DoubleDown 100, Bid 100] -> Stand
+--     _ -> Hit -- playHand upcard hand memo
+
+-- decideAction (Card Spade Ace) [Card Heart Two, Card Club Three] (Memory 100 [CardFreq Ace 3, CardFreq Two 3, CardFreq Three 3] [Bid 100] Nothing)
 
 decide2nd :: Card -> [Card] -> Memory -> Action
-decide2nd upcard hand memo 
+decide2nd upcard hand memo
+    | trace "decide2nd" False = undefined
     -- Insurance
-    | getRank upcard == Ace = if probValue 10 (deckState memo) > 0.667 then Insurance (bid `div` 2) else playHand upcard hand memo
+    | getRank upcard == Ace = if probValue' 10 (deckState memo) > 67 then Insurance (bid `div` 2) else playHand upcard hand memo
     -- Split
-    | getRank (head hand) == getRank (head (tail hand)) && 
+    | getRank (head hand) == getRank (head (tail hand)) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
     -- Double
-    | handCalc hand <= 11 = DoubleDown (2 * bid)
+    | handCalc hand <= 11 = DoubleDown bid
 
     | otherwise = playHand upcard hand memo
     where bid = currBid memo
@@ -99,18 +117,15 @@ decide2nd upcard hand memo
 -- Hit Stand DoubleDown Split
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
+    | trace ("playHand " ++ show p ++ " " ++ show d) False = undefined
     | diff > 0 = Hit
-    | diff == 0 = Stand
+    | diff == 0 = Hit
     | diff < 0 = Stand
     | otherwise = Stand
-    where 
-        p = probValueBelow (21 - handCalc hand) (deckState memo)
-        d = probValueBelow (21 - handCalc [upcard]) (deckState memo)
+    where
+        p = probValueBelow' (21 - handCalc hand) (deckState memo)
+        d = probValueBelow' (21 - handCalc [upcard]) (deckState memo)
         diff = p - d
-     
-    -- in case diff of
-    --     0 -> Hit 
-    --     1 -> Stand
 
 -- calculates the probability of the dealer's hidden card (below 17?)
 -- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
@@ -130,10 +145,16 @@ probWin hand _ deckState = let
     in probValueBelow p deckState
 
 probValueBelow :: Fractional a => Int -> [CardFreq] -> a
-probValueBelow val deckState = fromIntegral (cardsBelow (targetValue - val) deckState) / fromIntegral (totalCards deckState)
+probValueBelow val deckState = trace "probValueBelow" fromIntegral (cardsBelow (targetValue - val) deckState) / fromIntegral (totalCards deckState)
+
+probValueBelow' :: Int -> [CardFreq] -> Int
+probValueBelow' val deckState = trace "probValueBelow'" (cardsBelow (targetValue - val) deckState) * 100 `div` totalCards deckState
 
 probValue :: Fractional a => Int -> [CardFreq] -> a
 probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
+
+probValue' :: Int -> [CardFreq] -> Int
+probValue' val deckState = foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState * 100 `div` totalCards deckState
 
 cardsBelow :: Int -> [CardFreq] -> Int
 cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
@@ -158,13 +179,16 @@ deserialise memo = case parse parseMemory <$> memo of
     Just (Error _) -> initMemory -- trace (Error "") ""
     Nothing -> initMemory
 
-updateMemory :: [Card] -> Action -> Maybe Card -> Memory -> Memory
-updateMemory newCards action upcard oldMemo = let
-    deckState_ = deckState oldMemo
-    lastActions_ = lastActions oldMemo
-    in case action of
-        Bid amt -> Memory amt (updateDeckState newCards deckState_) [action] upcard
-        _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
+updateMemoryInfo :: [Card] -> Maybe Card -> Memory -> Memory
+updateMemoryInfo newCards upcard oldMemo = oldMemo {deckState = updateDeckState newCards (deckState oldMemo), lastUpcard = upcard}
+    -- in case action of
+    --     Bid amt -> Memory amt (updateDeckState newCards deckState_) [action] upcard
+    --     _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
+
+updateMemoryAction :: Action -> Memory -> Memory
+updateMemoryAction action oldMemo = case action of
+    Bid amt -> oldMemo {currBid = amt, lastActions = [action]}
+    _ -> oldMemo {lastActions = action : lastActions oldMemo}
 
 updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
 updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCards)
@@ -213,7 +237,7 @@ Utility
 ---------------------------------}
 
 initMemory :: Memory
-initMemory = Memory 0 (zipWith CardFreq [Ace ..] (replicate 13 (numRanks))) [Stand] Nothing
+initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing
 
 traceIf :: Bool -> String -> p -> p
 traceIf True  s x = trace s x
