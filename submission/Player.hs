@@ -49,15 +49,15 @@ instance Show CardFreq where
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    -- | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    -- | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    -- | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    -- | otherwise 
+    | otherwise 
     = let
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
-            Nothing -> makeBid points newMemo
+            Nothing -> makeBid pid points newMemo
             Just c -> decideAction c hand newMemo
         finalMemo = updateMemoryAction action newMemo
         in (action, show finalMemo)
@@ -67,20 +67,32 @@ playCard upcard points info pid memo hand
 Bidding & Actions?
 ---------------------------------}
 
-makeBid :: [PlayerPoints] -> Memory -> Action
-makeBid _ _ = Bid maxBid
+makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
+makeBid pid points memo 
+    | p > 2/3 || combo > 2/3 = Bid maxBid
+    | p > 1/2 = Bid $ (maxBid + minBid) `div` 2
+    | otherwise = Bid $ min minBid $ getPoint pid points
+    where 
+        p = probValueBelow 7 deckState_
+        combo = probValue 1 deckState_ + probValue 10 deckState_
+        deckState_ = deckState memo
+
+getPoint :: PlayerId -> [PlayerPoints] -> Points
+getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
 
 decideAction :: Card -> [Card] -> Memory -> Action
-decideAction upcard hand memo = case lastActions memo of
+decideAction upcard hand memo = case take 2 $ lastActions memo of
     [Bid _] -> decide2nd upcard hand memo
-    [DoubleDown _, Bid _] -> Hit
-    [Hit, DoubleDown _, Bid _] -> Stand
+    [DoubleDown _, _] -> Hit
+    [Hit, DoubleDown _] -> Stand
     _ -> playHand upcard hand memo
 
 decide2nd :: Card -> [Card] -> Memory -> Action
 decide2nd upcard hand memo
     -- Insurance -- must 1/2 or put bid??
-    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0 then Insurance bid else playHand upcard hand memo
+    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0 
+        then Insurance bid 
+        else playHand upcard hand memo
     -- Split
     | getRank (head hand) == getRank (head (tail hand)) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
@@ -94,13 +106,16 @@ decide2nd upcard hand memo
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
     | p > 2/3 = Hit
+    | d < 1/3 && phand > dhand = Stand
     | diff > -1/3 = Hit
     -- | diff == 0 = Hit
     | diff <= -1/3 = Stand
     | otherwise = Stand
     where
-        p = probValueBelow (targetValue - handCalc hand) (deckState memo)
-        d = probValueBelow (targetValue - handCalc [upcard]) (deckState memo)
+        p = probValueBelow (targetValue - phand) (deckState memo)
+        d = probValueBelow (targetValue - dhand) (deckState memo)
+        phand = handCalc hand
+        dhand = handCalc [upcard]
         diff = p - d
 
 -- probValueBelow 17 [CardFreq Ace 12, CardFreq Two 12, CardFreq Three 12, CardFreq Four 12, CardFreq Five 12, CardFreq Six 12, CardFreq Seven 12, CardFreq Eight 12, CardFreq Nine 12, CardFreq Ten 12, CardFreq Jack 12, CardFreq Queen 12, CardFreq King 12]
