@@ -49,12 +49,13 @@ instance Show CardFreq where
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    -- | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    -- | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    -- | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    | otherwise = let
-        newMemo = updateMemoryInfo (getNewCards pid upcard info hand newMemo) upcard (deserialise memo)
+    -- | otherwise 
+    = let
+        newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
             Nothing -> makeBid points newMemo
             Just c -> decideAction c hand newMemo
@@ -78,8 +79,8 @@ decideAction upcard hand memo = case lastActions memo of
 
 decide2nd :: Card -> [Card] -> Memory -> Action
 decide2nd upcard hand memo
-    -- Insurance
-    | getRank upcard == Ace = if probValue' 10 (deckState memo) > 67 then Insurance (bid `div` 2) else playHand upcard hand memo
+    -- Insurance -- must 1/2 or put bid??
+    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0 then Insurance bid else playHand upcard hand memo
     -- Split
     | getRank (head hand) == getRank (head (tail hand)) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
@@ -92,14 +93,17 @@ decide2nd upcard hand memo
 -- Hit Stand DoubleDown Split
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
-    | diff > 0 = Hit
-    | diff == 0 = Hit
-    | diff < 0 = Stand
+    | p > 2/3 = Hit
+    | diff > -1/3 = Hit
+    -- | diff == 0 = Hit
+    | diff <= -1/3 = Stand
     | otherwise = Stand
     where
-        p = probValueBelow (21 - handCalc hand) (deckState memo)
-        d = probValueBelow (21 - handCalc [upcard]) (deckState memo)
+        p = probValueBelow (targetValue - handCalc hand) (deckState memo)
+        d = probValueBelow (targetValue - handCalc [upcard]) (deckState memo)
         diff = p - d
+
+-- probValueBelow 17 [CardFreq Ace 12, CardFreq Two 12, CardFreq Three 12, CardFreq Four 12, CardFreq Five 12, CardFreq Six 12, CardFreq Seven 12, CardFreq Eight 12, CardFreq Nine 12, CardFreq Ten 12, CardFreq Jack 12, CardFreq Queen 12, CardFreq King 12]
 
 -- calculates the probability of the dealer's hidden card (below 17?)
 -- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
@@ -111,24 +115,24 @@ playHand upcard hand memo
 -- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
 -- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
 
-probWin :: [Card] -> Card -> [CardFreq] -> Float
+probWin :: [Card] -> Card -> [CardFreq] -> Double
 probWin hand _ deckState = let
     p = handCalc hand
     -- d = handCalc [upcard]
     -- probPNotBust = 
     in probValueBelow p deckState
 
-probValueBelow :: Fractional a => Int -> [CardFreq] -> a
-probValueBelow val deckState = fromIntegral (cardsBelow (targetValue - val) deckState) / fromIntegral (totalCards deckState)
+probValueBelow :: Int -> [CardFreq] -> Double
+probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
 
-probValueBelow' :: Int -> [CardFreq] -> Int
-probValueBelow' val deckState = cardsBelow (targetValue - val) deckState * 100 `div` totalCards deckState
+-- probValueBelow' :: Int -> [CardFreq] -> Int
+-- probValueBelow' val deckState = cardsBelow (targetValue - val) deckState * 100 `div` totalCards deckState
 
-probValue :: Fractional a => Int -> [CardFreq] -> a
+probValue :: Int -> [CardFreq] -> Double
 probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
 
-probValue' :: Int -> [CardFreq] -> Int
-probValue' val deckState = foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState * 100 `div` totalCards deckState
+-- probValue' :: Int -> [CardFreq] -> Int
+-- probValue' val deckState = foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState * 100 `div` totalCards deckState
 
 cardsBelow :: Int -> [CardFreq] -> Int
 cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
@@ -153,11 +157,14 @@ deserialise memo = case parse parseMemory <$> memo of
     Just (Error _) -> trace "Error occured in deserialising memory!" initMemory
     Nothing -> initMemory
 
-updateMemoryInfo :: [Card] -> Maybe Card -> Memory -> Memory
-updateMemoryInfo newCards upcard oldMemo = oldMemo {deckState = updateDeckState newCards (deckState oldMemo), lastUpcard = upcard}
-    -- in case action of
-    --     Bid amt -> Memory amt (updateDeckState newCards deckState_) [action] upcard
-    --     _ -> Memory (currBid oldMemo) (updateDeckState newCards deckState_) (action : lastActions_) upcard
+-- (getNewCards pid upcard info hand newMemo)
+updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
+updateMemoryInfo upcard pid info hand oldMemo = 
+    oldMemo {
+        deckState = updateDeckState newCards (deckState oldMemo), 
+        lastUpcard = upcard
+    }
+    where newCards = getNewCards pid upcard info hand oldMemo
 
 updateMemoryAction :: Action -> Memory -> Memory
 updateMemoryAction action oldMemo = case action of
@@ -222,6 +229,10 @@ filter' f alist = (filter f alist, filter (not . f) alist)
 
 numRanks :: Int
 numRanks = numDecks *4
+
+powerset :: [a] -> [[a]]
+powerset [] = [[]]
+powerset (x:xs) = (x:) <$> (((x:) <$> powerset xs) ++ powerset xs)
 
 
 
