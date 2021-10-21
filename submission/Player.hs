@@ -49,11 +49,11 @@ instance Show CardFreq where
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    -- | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    -- | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    -- | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    | otherwise 
+    -- | otherwise 
     = let
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
@@ -69,12 +69,13 @@ Bidding & Actions?
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo 
-    | p > 2/3 || combo > 2/3 = Bid maxBid
-    | p > 1/2 = Bid $ (maxBid + minBid) `div` 2
-    | otherwise = Bid $ min minBid $ getPoint pid points
+    | combo > 1/2 = Bid maxBid
+    | p > 1/3 = Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
+    | otherwise = Bid $ min ((maxBid + minBid) `div` 3) $ getPoint pid points
+    -- | otherwise = Bid maxBid
     where 
-        p = probValueBelow 7 deckState_
-        combo = probValue 1 deckState_ + probValue 10 deckState_
+        p = probValueBelow 8 deckState_
+        combo = probValue 1 deckState_ * probValue 10 deckState_
         deckState_ = deckState memo
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
@@ -89,15 +90,15 @@ decideAction upcard hand memo = case take 2 $ lastActions memo of
 
 decide2nd :: Card -> [Card] -> Memory -> Action
 decide2nd upcard hand memo
+    -- Double
+    | handCalc hand == 11 = DoubleDown bid
+    -- Split
+    | getRank (head hand) == getRank (head (tail hand)) &&
+      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
     -- Insurance -- must 1/2 or put bid??
     | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0 
         then Insurance bid 
         else playHand upcard hand memo
-    -- Split
-    | getRank (head hand) == getRank (head (tail hand)) &&
-      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
-    -- Double
-    | handCalc hand <= 11 = DoubleDown bid
 
     | otherwise = playHand upcard hand memo
     where bid = currBid memo
@@ -105,8 +106,10 @@ decide2nd upcard hand memo
 -- Hit Stand DoubleDown Split
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
-    | p > 2/3 = Hit
-    | d < 1/3 && phand > dhand = Stand
+    | phand < 11 = Hit
+    | p > 1/2 && length hand == 2 = DoubleDown $ currBid memo
+    | p > 1/3 = Hit
+    | d < 1/3 && phand >= 19 && phand > dhand = Stand
     | diff > -1/3 = Hit
     -- | diff == 0 = Hit
     | diff <= -1/3 = Stand
@@ -118,7 +121,7 @@ playHand upcard hand memo
         dhand = handCalc [upcard]
         diff = p - d
 
--- probValueBelow 17 [CardFreq Ace 12, CardFreq Two 12, CardFreq Three 12, CardFreq Four 12, CardFreq Five 12, CardFreq Six 12, CardFreq Seven 12, CardFreq Eight 12, CardFreq Nine 12, CardFreq Ten 12, CardFreq Jack 12, CardFreq Queen 12, CardFreq King 12]
+-- probValueBelow 10 [CardFreq Ace 4, CardFreq Two 7, CardFreq Three 6, CardFreq Four 5, CardFreq Five 8, CardFreq Six 3, CardFreq Seven 8, CardFreq Eight 4, CardFreq Nine 3, CardFreq Ten 8, CardFreq Jack 5, CardFreq Queen 4, CardFreq King 7]
 
 -- calculates the probability of the dealer's hidden card (below 17?)
 -- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
@@ -224,6 +227,18 @@ includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
 includePlayerHead pid info = let
     (hands, phand) = filter' ((pid /=) . _playerInfoId) info in
     hands ++ [PlayerInfo pid [head (playerInfoHand (head phand))]]
+
+
+
+{---------------------------------
+Tree
+---------------------------------}
+
+
+
+
+
+
 
 
 
