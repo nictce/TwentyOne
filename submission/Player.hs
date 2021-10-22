@@ -56,7 +56,7 @@ playCard upcard points info pid memo hand
     | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
     | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    | otherwise 
+    | otherwise
     = let
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
@@ -71,12 +71,12 @@ Bidding & Actions?
 ---------------------------------}
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
-makeBid pid points memo 
+makeBid pid points memo
     -- | combo > 1/3 = Bid maxBid
     | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
     | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     -- | otherwise = Bid maxBid
-    where 
+    where
         p = probValueBelow 8 deckState_
         combo = probValue 1 deckState_ * probValue 10 deckState_
         deckState_ = deckState memo
@@ -99,8 +99,8 @@ decide2nd upcard hand memo
     | getRank (head hand) == getRank (head (tail hand)) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
     -- Insurance -- must 1/2 or put bid??
-    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0 
-        then Insurance bid 
+    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0
+        then Insurance bid
         else playHand upcard hand memo
 
     | otherwise = playHand upcard hand memo
@@ -158,6 +158,9 @@ probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == 
 cardsBelow :: Int -> [CardFreq] -> Int
 cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
 
+cardsEq :: Int -> [CardFreq] -> Int
+cardsEq val = foldr (\v a -> if rankValue (rank v) == val then a + freq v else a) 0
+
 totalCards :: [CardFreq] -> Int
 totalCards = foldr (\v a -> a + freq v) 0
 
@@ -180,9 +183,9 @@ deserialise memo = case parse parseMemory <$> memo of
 
 -- (getNewCards pid upcard info hand newMemo)
 updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
-updateMemoryInfo upcard pid info hand oldMemo = 
+updateMemoryInfo upcard pid info hand oldMemo =
     oldMemo {
-        deckState = updateDeckState newCards (deckState oldMemo), 
+        deckState = updateDeckState newCards (deckState oldMemo),
         lastUpcard = upcard
     }
     where newCards = getNewCards pid upcard info hand oldMemo
@@ -237,26 +240,49 @@ includePlayerHead pid info = let
 Tree
 ---------------------------------}
 
-data Tree a = Leaf a | Node a (Tree a)
+data Tree a = Node a [Tree a] -- | Leaf a 
     deriving (Show)
 
--- data Leaf a = Leaf {
+data Load = L {
+    len :: Int,
+    total :: HandValue, -- total value of combination of ranks
+    prob :: Double, -- probability of getting to that node from combination of ranks
+    ranks :: Hand
+}
 
--- }
+instance Show Load where
+    show l = intercalate "," values where
+        show_ f = show (f l)
+        values = [
+            show_ len,
+            show_ total,
+            show_ prob,
+            show_ ranks]
 
--- data Tree = Tree {
---     len :: Int,
---     total :: Int,
---     prob :: Double,
---     nodes :: [Tree]
--- }
+-- search (Node a []) _ = a
+-- search (Node (Load ))
+
+makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
+makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (calcProb prob' hand deckState) hand) []
+makeTree n val prob' deckState hand = Node (L n (handValue hand) prob'' hand) $
+                            makeTree (n-1) val prob'' deckState <$> hand'
+                                where 
+                                    hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> [Ace ..])
+                                    prob'' = calcProb prob' hand deckState
+
+-- makeTree 5 17 1.0 []
+-- makeTree 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+calcProb :: Double -> [Card] -> [CardFreq] -> Double
+calcProb _ [] _ = 1.0
+calcProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState + 1) * prob'
+    where 
+        rank' = getRank (head hand)
+        newRankFreq = cardsEq (rankValue rank') deckState - length (filter ((==rank') . getRank) hand) + 1
 
 
 
-
-
-
-
+-- calcProbBelow turns val deckState hand = sum 
+--     where tree = makeTree turns val 1.0 deckState hand
 
 {---------------------------------
 Utility
