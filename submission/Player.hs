@@ -122,7 +122,7 @@ playHand upcard hand memo
         d = probValueBelow (targetValue - dhand) (deckState memo)
         phand = handCalc hand
         dhand = handCalc [upcard]
-        tree = makeTree (5 - length hand) Combo 1.0 (deckState memo) hand
+        tree = makeTree (5 - length hand) Combo (deckState memo) hand
         diff = p - d
         treeprob = valTree Charlie tree + valTree (Value 21) tree
 
@@ -252,37 +252,60 @@ instance Show Load where
             show_ prob,
             show_ ranks]
 
-makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
-makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (jointProb prob' hand deckState) hand) []
+makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
+makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
+    makeTree' (n-1) maxVal 1.0 deckState <$> newHand
+    where
+        -- availRanks = rank <$> filter ((>0) . freq) deckState
+        -- newHand = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
+        newHand = possHands maxVal deckState hand
 
-makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
-    if terminal then [] else makeTree (n-1) val prob'' deckState' <$> hand'
+makeTree' :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
+makeTree' 0 _ prob' deckState hand = Node (L 0 newTotal newProb hand) []
+    where
+        newTotal = handValue hand
+        newProb = jointProb prob' hand deckState
+makeTree' n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
+    if terminal then [] 
+    else makeTree' (n-1) maxVal newProb newDeckState <$> newHand
         where
-            hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> availRanks)
-            availRanks = rank <$> filter ((>0) . freq) deckState'
-            prob'' = jointProb prob' hand deckState
-            val' = handValue hand
-            deckState' = updateDeckState hand deckState
-            terminal = val' == Bust || val' == Combo || val' == Charlie
+            newTotal = handValue hand
+            terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie
 
--- makeTree 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
--- makeTree 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
+            newProb = jointProb prob' hand deckState -- newProb is with new head
+            newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
+            -- availRanks = rank <$> filter ((>0) . freq) newDeckState
+            -- newHand = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
+            newHand = possHands maxVal newDeckState hand
+
+possHands :: HandValue -> [CardFreq] -> [Card] -> [[Card]]
+possHands maxVal deckState hand = handsLTmaxVal -- (:hand) <$> handsLTmaxVal
+    where
+        availableRanks = rank <$> filter ((>0) . freq) deckState
+        -- handsLTmaxVal = filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availableRanks)
+        handsLTmaxVal = foldr (\v a -> if handValue (v:hand) <= maxVal then (v:hand):a else a) [] (Card Spade <$> availableRanks)
+
+-- makeTree' 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 5 (Combo) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 5 Combo 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
+-- makeTree' 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
+-- makeTree' 3 (Combo) 1.0 [CardFreq Six 2, CardFreq Four 2, CardFreq Six 2] [Card Spade Two]
 
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
-jointProb _ [] _ = 1.0
-jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState) * prob'
+jointProb _ [] _ = 1.0 -- base probability starts from 1
+jointProb prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState) * prob'
     where
         rank' = getRank (head hand)
-        newRankFreq = rankEq rank' deckState - length (filter ((==rank') . getRank) hand) + 1
+        numOfRank = rankEq rank' deckState -- length (filter ((==rank') . getRank) hand) + 1
 
 
 -- jointProb' :: Double -> [Card] -> [CardFreq] -> Double
 -- jointProb' _ [] _ = 1.0
--- jointProb' prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState') * prob'
+-- jointProb' prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState') * prob'
 --     where
 --         rank' = getRank (head hand)
---         newRankFreq = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
+--         numOfRank = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
 --         deckState' = updateDeckState (tail hand) deckState -- deck with hand without new card
 
 rankEq :: Rank -> [CardFreq] -> Int
@@ -305,7 +328,25 @@ valTree val (Node a trees) = if total a == val then prob a else sum (valTree val
 -- resultTable tree = 
 
 -- jointProbBelow turns val deckState hand = sum 
---     where tree = makeTree turns val 1.0 deckState hand
+--     where tree = makeTree' turns val 1.0 deckState hand
+
+jointProbEq :: HandValue -> Tree Load -> Double
+jointProbEq val (Node a trees)
+    | total a == val = prob a
+    | otherwise = sum (valTree val <$> trees)
+
+jointProbBelow :: HandValue -> Tree Load -> Double
+jointProbBelow val (Node a trees)
+    | total a == val = prob a
+    | total a < val = prob a + sum (valTree val <$> trees)
+    | otherwise = 0
+    -- | otherwise = sum (valTree val <$> trees)
+
+jointProbLeaves :: HandValue -> Tree Load -> Double
+jointProbLeaves val (Node a []) = if total a == val && len a == 0 then prob a else 0
+jointProbLeaves val (Node _ trees) = sum (jointProbLeaves val <$> trees)
+
+
 
 {---------------------------------
 Utility
