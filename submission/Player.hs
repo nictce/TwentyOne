@@ -44,16 +44,19 @@ instance Show Memory where
 instance Show CardFreq where
     show cf = show (rank cf) ++ ":" ++ show (freq cf)
 
+-- instance Functor CardFreq where
+--     fmap f (CardFreq rank freq) = CardFreq rank $ f freq
+
 
 
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    -- | trace ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    -- | trace ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    -- | trace ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    -- | otherwise 
+    | otherwise 
     = let
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
@@ -69,9 +72,9 @@ Bidding & Actions?
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo 
-    | combo > 1/2 = Bid maxBid
-    | p > 1/3 = Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
-    | otherwise = Bid $ min ((maxBid + minBid) `div` 3) $ getPoint pid points
+    -- | combo > 1/3 = Bid maxBid
+    | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
+    | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     -- | otherwise = Bid maxBid
     where 
         p = probValueBelow 8 deckState_
@@ -234,7 +237,19 @@ includePlayerHead pid info = let
 Tree
 ---------------------------------}
 
+data Tree a = Leaf a | Node a (Tree a)
+    deriving (Show)
 
+-- data Leaf a = Leaf {
+
+-- }
+
+-- data Tree = Tree {
+--     len :: Int,
+--     total :: Int,
+--     prob :: Double,
+--     nodes :: [Tree]
+-- }
 
 
 
