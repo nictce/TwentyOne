@@ -67,7 +67,7 @@ playCard upcard points info pid memo hand
 
 
 {---------------------------------
-Bidding & Actions?
+Bidding
 ---------------------------------}
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
@@ -83,6 +83,11 @@ makeBid pid points memo
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
+
+
+{---------------------------------
+Actions
+---------------------------------}
 
 decideAction :: Card -> [Card] -> Memory -> Action
 decideAction upcard hand memo = case take 2 $ lastActions memo of
@@ -126,22 +131,9 @@ playHand upcard hand memo
         diff = p - d
         treeprob = valTree Charlie tree + valTree (Value 21) tree
 
--- calculates the probability of the dealer's hidden card (below 17?)
--- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
--- dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
---     probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
---     probValueBelow upcardVal deckState
-
--- finds whether the dealer's hidden card is from a new deck
--- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
--- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
-
--- probWin :: [Card] -> Card -> [CardFreq] -> Double
--- probWin hand _ deckState = let
---     p = handCalc hand
---     -- d = handCalc [upcard]
---     -- probPNotBust = 
---     in probValueBelow p deckState
+{---------------------------------
+Deck Statistics
+---------------------------------}
 
 probValueBelow :: Int -> [CardFreq] -> Double
 probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
@@ -163,6 +155,23 @@ rankValue rank
     --  rank == Ace = 11
     | rank < Jack = fromEnum rank + 1
     | otherwise   = 10
+
+-- calculates the probability of the dealer's hidden card (below 17?)
+-- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
+-- dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
+--     probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
+--     probValueBelow upcardVal deckState
+
+-- finds whether the dealer's hidden card is from a new deck
+-- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
+-- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
+
+-- probWin :: [Card] -> Card -> [CardFreq] -> Double
+-- probWin hand _ deckState = let
+--     p = handCalc hand
+--     -- d = handCalc [upcard]
+--     -- probPNotBust = 
+--     in probValueBelow p deckState
 
 
 {---------------------------------
@@ -252,6 +261,13 @@ instance Show Load where
             show_ prob,
             show_ ranks]
 
+-- instance Foldable Tree where
+--     foldMap f (Node a []) = f a
+--     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
+
+-- instance Functor Load where
+--     fmap f l = f $ prob l
+
 makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
 makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
     makeTree' (n-1) maxVal 1.0 deckState <$> newHand
@@ -274,49 +290,23 @@ makeTree' n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
 
             newProb = jointProb prob' hand deckState -- newProb is with new head
             newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
-            -- availRanks = rank <$> filter ((>0) . freq) newDeckState
-            -- newHand = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
             newHand = possHands maxVal newDeckState hand
 
 possHands :: HandValue -> [CardFreq] -> [Card] -> [[Card]]
-possHands maxVal deckState hand = handsLTmaxVal -- (:hand) <$> handsLTmaxVal
+possHands maxVal deckState hand = handsLTmaxVal
     where
         availableRanks = rank <$> filter ((>0) . freq) deckState
-        -- handsLTmaxVal = filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availableRanks)
         handsLTmaxVal = foldr (\v a -> if handValue (v:hand) <= maxVal then (v:hand):a else a) [] (Card Spade <$> availableRanks)
-
--- makeTree' 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree' 5 (Combo) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree' 5 Combo 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree' 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
--- makeTree' 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
--- makeTree' 3 (Combo) 1.0 [CardFreq Six 2, CardFreq Four 2, CardFreq Six 2] [Card Spade Two]
 
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0 -- base probability starts from 1
 jointProb prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState) * prob'
     where
         rank' = getRank (head hand)
-        numOfRank = rankEq rank' deckState -- length (filter ((==rank') . getRank) hand) + 1
-
-
--- jointProb' :: Double -> [Card] -> [CardFreq] -> Double
--- jointProb' _ [] _ = 1.0
--- jointProb' prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState') * prob'
---     where
---         rank' = getRank (head hand)
---         numOfRank = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
---         deckState' = updateDeckState (tail hand) deckState -- deck with hand without new card
+        numOfRank = rankEq rank' deckState
 
 rankEq :: Rank -> [CardFreq] -> Int
 rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
-
--- instance Foldable Tree where
---     foldMap f (Node a []) = f a
---     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
-
--- instance Functor Load where
---     fmap f l = f $ prob l
 
 sumTree :: Tree Load -> Double
 sumTree (Node a []) = prob a -- only take probabilities at the leaves
@@ -325,55 +315,52 @@ sumTree (Node _ trees) = sum (sumTree <$> trees) -- + (if total a /= Value 0 the
 valTree :: HandValue -> Tree Load -> Double
 valTree val (Node a trees) = if total a == val then prob a else sum (valTree val <$> trees)
 
--- resultTable tree = 
-
--- jointProbBelow turns val deckState hand = sum 
---     where tree = makeTree' turns val 1.0 deckState hand
-
 jointProbEq :: HandValue -> Tree Load -> Double
 jointProbEq val (Node a trees)
     | total a == val = prob a
     | otherwise = sum (valTree val <$> trees)
 
-jointProbBelow :: HandValue -> Tree Load -> Double
-jointProbBelow val (Node a trees)
-    | total a == val = prob a
-    | total a < val = prob a + sum (valTree val <$> trees)
-    | otherwise = 0
-    -- | otherwise = sum (valTree val <$> trees)
-
 jointProbLeaves :: HandValue -> Tree Load -> Double
 jointProbLeaves val (Node a []) = if total a == val && len a == 0 then prob a else 0
 jointProbLeaves val (Node _ trees) = sum (jointProbLeaves val <$> trees)
 
+-- makeTree' 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 5 (Combo) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 5 Combo 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree' 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
+-- makeTree' 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
+-- makeTree' 3 (Combo) 1.0 [CardFreq Six 2, CardFreq Four 2, CardFreq Six 2] [Card Spade Two]
 
-
-{---------------------------------
-Utility
----------------------------------}
-
-initMemory :: Memory
-initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing
-
-traceIf :: Bool -> String -> p -> p
-traceIf True  s x = trace s x
-traceIf False _ x = x
-
-filter' :: (a -> Bool) -> [a] -> ([a], [a])
-filter' f alist = (filter f alist, filter (not . f) alist)
-
-numRanks :: Int
-numRanks = numDecks *4
-
-powerset :: [a] -> [[a]]
-powerset [] = [[]]
-powerset (x:xs) = (x:) <$> (((x:) <$> powerset xs) ++ powerset xs)
+-- jointProbBelow :: HandValue -> Tree Load -> Double
+-- jointProbBelow val (Node a trees)
+--     | total a < val = prob a + sum (valTree val <$> trees)
+--     | total a == val = prob a
+--     | otherwise = 0
 
 
 
 {---------------------------------
-Parsers
+Parser Combinators
 ---------------------------------}
+
+parseInt :: Parser Int
+parseInt = P $ \s -> case readInt s of
+    Just (v, r) -> Result r v
+    Nothing -> Error $UnexpectedString s
+
+-- parses a Showable into its type according to an input list of possible type values
+parseShow :: (Foldable t, Functor t, Show a) => t a -> Parser a
+parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
+
+parseShow_ :: Show b => b -> Parser b
+parseShow_ a = stringTok (show a) >> pure a
+
+parseList :: Parser a -> Parser [a]
+parseList parser = do
+    _ <- stringTok "["
+    result <- sepby parser commaTok
+    _ <- stringTok "]"
+    pure result
 
 parseMemory :: Parser Memory
 parseMemory = do
@@ -392,9 +379,6 @@ parseCardFreq = do
     _ <- stringTok ":"
     CardFreq r <$> parseInt
 
-parseRank :: Parser Rank
-parseRank = parseShow [Ace ..]
-
 parseAction_ :: Parser Action
 parseAction_ =  (stringTok "Hit" >> pure Hit) |||
     (stringTok "Stand" >> pure Stand) |||
@@ -408,12 +392,11 @@ parseCard = do
     suit <- parseShow [Spade ..]
     Card suit <$> parseRank
 
+parseRank :: Parser Rank
+parseRank = parseShow [Ace ..]
+
 parseMaybeCard :: Parser (Maybe Card)
 parseMaybeCard = (stringTok "Just " >> pure <$> parseCard) ||| (stringTok "Nothing" >> pure Nothing)
-
-
-
-
 
 
 {---------------------------------
@@ -458,23 +441,27 @@ sepby1 a s = do
         xs <- list $ s >> a
         pure (x:xs)
 
-parseInt :: Parser Int
-parseInt = P $ \s -> case readInt s of
-    Just (v, r) -> Result r v
-    Nothing -> Error $UnexpectedString s
 
-parseList :: Parser a -> Parser [a]
-parseList parser = do
-    _ <- stringTok "["
-    result <- sepby parser commaTok
-    _ <- stringTok "]"
-    pure result
+{---------------------------------
+Utility
+---------------------------------}
 
-parseShow :: (Foldable t, Functor t, Show a) => t a -> Parser a
-parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
+initMemory :: Memory
+initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing
 
-parseShow_ :: Show b => b -> Parser b
-parseShow_ a = stringTok (show a) >> pure a
+traceIf :: Bool -> String -> p -> p
+traceIf True  s x = trace s x
+traceIf False _ x = x
+
+filter' :: (a -> Bool) -> [a] -> ([a], [a])
+filter' f alist = (filter f alist, filter (not . f) alist)
+
+numRanks :: Int
+numRanks = numDecks * 4
+
+-- powerset :: [a] -> [[a]]
+-- powerset [] = [[]]
+-- powerset (x:xs) = (x:) <$> (((x:) <$> powerset xs) ++ powerset xs)
 
 
 
