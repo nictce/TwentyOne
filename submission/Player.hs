@@ -390,23 +390,8 @@ satisfy f = do
   c <- character
   (if f c then pure else unexpectedCharParser) c
 
--- isNot :: Char -> Parser Char
--- isNot c = satisfy (/= c)
-
--- digit :: Parser Char
--- digit = satisfy isDigit
-
-space :: Parser Char
-space = satisfy isSpace
-
 spaces :: Parser String
-spaces = list space
-
--- sequenceParser :: [Parser a] -> Parser [a]
--- sequenceParser = sequence
-
--- thisMany :: Int -> Parser a -> Parser [a]
--- thisMany n l = sequenceParser (replicate n l)
+spaces = list (satisfy isSpace)
 
 string :: String -> Parser String
 string = traverse is
@@ -416,9 +401,6 @@ tok p = do
     r <- p
     _ <- spaces
     pure r
-
--- charTok :: Char -> Parser Char
--- charTok c = tok (is c)
 
 commaTok :: Parser Char
 commaTok = tok (is ',')
@@ -435,13 +417,6 @@ sepby1 a s = do
         xs <- list $ s >> a
         pure (x:xs)
 
--- parse a character and see if it is part of the string s
--- oneof :: String -> Parser Char
--- oneof s = satisfy (`elem` s)
-
--- noneof :: String -> Parser Char
--- noneof s = satisfy (`notElem` s)
-
 parseInt :: Parser Int
 parseInt = P $ \s -> case readInt s of
     Just (v, r) -> Result r v
@@ -454,25 +429,11 @@ parseList parser = do
     _ <- stringTok "]"
     pure result
 
--- parseShow :: (Functor f, Show a) => f a -> f (Parser a)
--- parseShow = fmap $ (>>) . stringTok . show <*> pure
--- parseShow = fmap (((>>) . stringTok . show) <*> pure)
--- parseShow = fmap (((>>) . stringTok . show) <*> pure)
-
-parseShow_ :: Show b => b -> Parser b
-parseShow_ a = stringTok (show a) >> pure a
-
 parseShow :: (Foldable t, Functor t, Show a) => t a -> Parser a
 parseShow alist = foldr1 (|||) (parseShow_ <$> alist)
 
--- parseShow :: Show b => b -> Parser b
--- parseShow alist = P $ \s -> case parse (stringTok s) s of
---     Result r str -> foldr1 (\a v -> if show v == str then (pure v) else a) (Error (UnexpectedString s)) alist
---     _ -> Error (UnexpectedString s)
-
--- parseShow :: (Foldable t, Show a, Functor t) => t a -> Parser a
--- parseShow alist = P $ \s -> case parse (stringTok s) s of
---     Result r str -> foldr (\a v@(Result _ n) -> if show n == str then v else a) (Error (UnexpectedString s)) (Result r <$> alist)
+parseShow_ :: Show b => b -> Parser b
+parseShow_ a = stringTok (show a) >> pure a
 
 
 
