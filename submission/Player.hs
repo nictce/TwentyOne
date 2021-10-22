@@ -263,21 +263,68 @@ instance Show Load where
 
 makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
 makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (jointProb prob' hand deckState) hand) []
-makeTree n val prob' deckState hand = Node (L n (handValue hand) prob'' hand) $
-                            makeTree (n-1) val prob'' deckState <$> hand'
-                                where 
-                                    hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> [Ace ..])
-                                    prob'' = jointProb prob' hand deckState
+makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
+    if terminal then [] else makeTree (n-1) val prob'' deckState <$> hand'
+        where
+            hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> availRanks)
+            availRanks = rank <$> filter ((>0) . freq) (updateDeckState hand deckState)
+            prob'' = jointProb prob' hand deckState
+            val' = handValue hand
+            terminal = val' == Bust || val' == Combo || val' == Charlie
 
--- makeTree 5 17 1.0 []
 -- makeTree 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree 5 (Value 5) 1 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+-- makeTree 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
+-- makeTree 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
+
+-- Node 2,0P,1.0,[] [
+    -- Node 1,11P,0.5,[SA] 
+    --     [
+    --         Node 0,Combo,0.5,[ST,SA] []
+    --     ],
+    -- Node 1,10P,0.5,[ST] [
+    --     Node 0,Combo,0.5,[SA,ST] []]]
+
+-- Node 3,0P,1.0,[] [
+--     Node 2,6P,0.25,[S6] [
+--         Node 1,14P,8.333333333333333e-2,[S8,S6] [
+--             Node 0,Bust,8.333333333333333e-2,[SK,S8,S6] []
+--         ],
+--         Node 1,16P,0.16666666666666666,[SK,S6] [
+--             Node 0,Bust,8.333333333333333e-2,[S8,SK,S6] [],
+--             Node 0,Bust,0.0,[SK,SK,S6] []
+--         ]
+--     ],
+--     Node 2,8P,0.25,[S8] [
+--         Node 1,14P,8.333333333333333e-2,[S6,S8] [
+--             Node 0,Bust,8.333333333333333e-2,[SK,S6,S8] []
+--         ],
+--         Node 1,18P,0.16666666666666666,[SK,S8] [
+--             Node 0,Bust,8.333333333333333e-2,[S6,SK,S8] [],
+--             Node 0,Bust,0.0,[SK,SK,S8] []
+--         ]
+--     ],
+--     Node 2,10P,0.5,[SK] [
+--         Node 1,16P,0.16666666666666666,[S6,SK] [
+--             Node 0,Bust,8.333333333333333e-2,[S8,S6,SK] [],
+--             Node 0,Bust,0.0,[SK,S6,SK] []
+--         ],
+--         Node 1,18P,0.16666666666666666,[S8,SK] [
+--             Node 0,Bust,8.333333333333333e-2,[S6,S8,SK] [],
+--             Node 0,Bust,0.0,[SK,S8,SK] []
+--         ]
+--     ]
+-- ]
+
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0
-jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState + 1) * prob'
-    where 
+jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState') * prob'
+    where
         rank' = getRank (head hand)
-        newRankFreq = cardsEq (rankValue rank') deckState - length (filter ((==rank') . getRank) hand) + 1
+        newRankFreq = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
+        deckState' = updateDeckState (tail hand) deckState -- deck with hand without new card
+
+rankEq :: Rank -> [CardFreq] -> Int
+rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
 
 -- instance Foldable Tree where
 --     foldMap f (Node a []) = f a
@@ -287,8 +334,15 @@ jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalC
 --     fmap f l = f $ prob l
 
 sumTree :: Tree Load -> Double
-sumTree (Node a trees) = (if total a /= Value 0 then prob a else 1 - prob a) + sum (sumTree <$> trees)
--- sumTree (Node a []) = prob a
+sumTree (Node a []) = prob a -- only take probabilities at the leaves
+sumTree (Node _ trees) = sum (sumTree <$> trees) -- + (if total a /= Value 0 then prob a else 1 - prob a) 
+
+-- valTree :: HandValue -> Int -> Tree Load -> Double
+-- valTree val _ (Node a []) = if total a == val then prob a else 0 -- only take probabilities at the leaves
+valTree :: HandValue -> Tree Load -> Double
+valTree val (Node a trees) = if total a == val then prob a else sum (valTree val <$> trees)
+
+-- resultTable tree = 
 
 -- jointProbBelow turns val deckState hand = sum 
 --     where tree = makeTree turns val 1.0 deckState hand
