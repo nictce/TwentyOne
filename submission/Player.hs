@@ -72,10 +72,10 @@ Bidding & Actions?
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
-    -- | combo > 1/3 = Bid maxBid
+    | combo > 1/3 = Bid maxBid
     | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
     | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
-    -- | otherwise = Bid maxBid
+    --  otherwise = Bid maxBid
     where
         p = probValueBelow 8 deckState_
         combo = probValue 1 deckState_ * probValue 10 deckState_
@@ -114,7 +114,6 @@ playHand upcard hand memo
     | p > 1/3 = Hit
     | d < 1/3 && phand >= 19 && phand > dhand = Stand
     | diff > -1/3 = Hit
-    -- | diff == 0 = Hit
     | diff <= -1/3 = Stand
     | otherwise = Stand
     where
@@ -263,25 +262,35 @@ instance Show Load where
 -- search (Node (Load ))
 
 makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
-makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (calcProb prob' hand deckState) hand) []
+makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (jointProb prob' hand deckState) hand) []
 makeTree n val prob' deckState hand = Node (L n (handValue hand) prob'' hand) $
                             makeTree (n-1) val prob'' deckState <$> hand'
                                 where 
                                     hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> [Ace ..])
-                                    prob'' = calcProb prob' hand deckState
+                                    prob'' = jointProb prob' hand deckState
 
 -- makeTree 5 17 1.0 []
 -- makeTree 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
-calcProb :: Double -> [Card] -> [CardFreq] -> Double
-calcProb _ [] _ = 1.0
-calcProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState + 1) * prob'
+-- makeTree 5 (Value 5) 1 (CardFreq <$> [Ace ..] <*> [numRanks]) []
+jointProb :: Double -> [Card] -> [CardFreq] -> Double
+jointProb _ [] _ = 1.0
+jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState + 1) * prob'
     where 
         rank' = getRank (head hand)
         newRankFreq = cardsEq (rankValue rank') deckState - length (filter ((==rank') . getRank) hand) + 1
 
+-- instance Foldable Tree where
+--     foldMap f (Node a []) = f a
+--     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
 
+-- instance Functor Load where
+--     fmap f l = f $ prob l
 
--- calcProbBelow turns val deckState hand = sum 
+sumTree :: Tree Load -> Double
+sumTree (Node a trees) = (if total a /= Value 0 then prob a else 1 - prob a) + sum (sumTree <$> trees)
+-- sumTree (Node a []) = prob a
+
+-- jointProbBelow turns val deckState hand = sum 
 --     where tree = makeTree turns val 1.0 deckState hand
 
 {---------------------------------
