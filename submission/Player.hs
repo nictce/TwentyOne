@@ -63,7 +63,6 @@ playCard upcard points info pid memo hand
             Nothing -> makeBid pid points newMemo
             Just c -> decideAction c hand newMemo
         finalMemo = updateMemoryAction action newMemo
-        -- tree = makeTree 5 Combo 1.0 (deckState finalMemo) []
         in (action, show finalMemo)
 
 
@@ -111,7 +110,7 @@ decide2nd upcard hand memo
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
     | phand < 11 = Hit
-    | valTree Charlie tree + valTree (Value 21) tree > 0.1 = Hit
+    | trace ("" ++ show treeprob) treeprob > 1/3 = Hit
     | p > 1/2 && length hand == 2 = DoubleDown $ currBid memo
     | p > 1/3 = Hit
     | d < 1/3 && phand >= 19 && phand > dhand = Stand
@@ -125,8 +124,7 @@ playHand upcard hand memo
         dhand = handCalc [upcard]
         tree = makeTree (5 - length hand) Combo 1.0 (deckState memo) hand
         diff = p - d
-
--- probValueBelow 10 [CardFreq Ace 4, CardFreq Two 7, CardFreq Three 6, CardFreq Four 5, CardFreq Five 8, CardFreq Six 3, CardFreq Seven 8, CardFreq Eight 4, CardFreq Nine 3, CardFreq Ten 8, CardFreq Jack 5, CardFreq Queen 4, CardFreq King 7]
+        treeprob = valTree Charlie tree + valTree (Value 21) tree
 
 -- calculates the probability of the dealer's hidden card (below 17?)
 -- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
@@ -138,24 +136,18 @@ playHand upcard hand memo
 -- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
 -- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
 
-probWin :: [Card] -> Card -> [CardFreq] -> Double
-probWin hand _ deckState = let
-    p = handCalc hand
-    -- d = handCalc [upcard]
-    -- probPNotBust = 
-    in probValueBelow p deckState
+-- probWin :: [Card] -> Card -> [CardFreq] -> Double
+-- probWin hand _ deckState = let
+--     p = handCalc hand
+--     -- d = handCalc [upcard]
+--     -- probPNotBust = 
+--     in probValueBelow p deckState
 
 probValueBelow :: Int -> [CardFreq] -> Double
 probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
 
--- probValueBelow' :: Int -> [CardFreq] -> Int
--- probValueBelow' val deckState = cardsBelow (targetValue - val) deckState * 100 `div` totalCards deckState
-
 probValue :: Int -> [CardFreq] -> Double
 probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
-
--- probValue' :: Int -> [CardFreq] -> Int
--- probValue' val deckState = foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState * 100 `div` totalCards deckState
 
 cardsBelow :: Int -> [CardFreq] -> Int
 cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
@@ -183,7 +175,6 @@ deserialise memo = case parse parseMemory <$> memo of
     Just (Error _) -> trace "Error occured in deserialising memory!" initMemory
     Nothing -> initMemory
 
--- (getNewCards pid upcard info hand newMemo)
 updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
 updateMemoryInfo upcard pid info hand oldMemo =
     oldMemo {
@@ -261,17 +252,14 @@ instance Show Load where
             show_ prob,
             show_ ranks]
 
--- search (Node a []) _ = a
--- search (Node (Load ))
-
 makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
 makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (jointProb prob' hand deckState) hand) []
 
 makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
-    if terminal then [] else makeTree (n-1) val prob'' deckState <$> hand'
+    if terminal then [] else makeTree (n-1) val prob'' deckState' <$> hand'
         where
             hand' = (:hand) <$> filter ((val >=) . handValue . (:hand)) (Card Spade <$> availRanks)
-            availRanks = rank <$> filter ((>0) . freq) (updateDeckState hand deckState)
+            availRanks = rank <$> filter ((>0) . freq) deckState'
             prob'' = jointProb prob' hand deckState
             val' = handValue hand
             deckState' = updateDeckState hand deckState
@@ -283,11 +271,19 @@ makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
 
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0
-jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState') * prob'
+jointProb prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState) * prob'
     where
         rank' = getRank (head hand)
-        newRankFreq = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
-        deckState' = updateDeckState (tail hand) deckState -- deck with hand without new card
+        newRankFreq = rankEq rank' deckState - length (filter ((==rank') . getRank) hand) + 1
+
+
+-- jointProb' :: Double -> [Card] -> [CardFreq] -> Double
+-- jointProb' _ [] _ = 1.0
+-- jointProb' prob' hand deckState = fromIntegral newRankFreq / fromIntegral (totalCards deckState') * prob'
+--     where
+--         rank' = getRank (head hand)
+--         newRankFreq = rankEq rank' deckState' - length (filter ((==rank') . getRank) hand) + 1
+--         deckState' = updateDeckState (tail hand) deckState -- deck with hand without new card
 
 rankEq :: Rank -> [CardFreq] -> Int
 rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
