@@ -52,17 +52,18 @@ instance Show CardFreq where
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    -- | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    -- | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
+    -- | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
 
-    | otherwise
+    -- | otherwise
     = let
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
             Nothing -> makeBid pid points newMemo
             Just c -> decideAction c hand newMemo
         finalMemo = updateMemoryAction action newMemo
+        -- tree = makeTree 5 Combo 1.0 (deckState finalMemo) []
         in (action, show finalMemo)
 
 
@@ -110,6 +111,7 @@ decide2nd upcard hand memo
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
     | phand < 11 = Hit
+    | valTree Charlie tree + valTree (Value 21) tree > 0.1 = Hit
     | p > 1/2 && length hand == 2 = DoubleDown $ currBid memo
     | p > 1/3 = Hit
     | d < 1/3 && phand >= 19 && phand > dhand = Stand
@@ -121,6 +123,7 @@ playHand upcard hand memo
         d = probValueBelow (targetValue - dhand) (deckState memo)
         phand = handCalc hand
         dhand = handCalc [upcard]
+        tree = makeTree (5 - length hand) Combo 1.0 (deckState memo) hand
         diff = p - d
 
 -- probValueBelow 10 [CardFreq Ace 4, CardFreq Two 7, CardFreq Three 6, CardFreq Four 5, CardFreq Five 8, CardFreq Six 3, CardFreq Seven 8, CardFreq Eight 4, CardFreq Nine 3, CardFreq Ten 8, CardFreq Jack 5, CardFreq Queen 4, CardFreq King 7]
@@ -263,6 +266,7 @@ instance Show Load where
 
 makeTree :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
 makeTree 0 _ prob' deckState hand = Node (L 0 (handValue hand) (jointProb prob' hand deckState) hand) []
+
 makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
     if terminal then [] else makeTree (n-1) val prob'' deckState <$> hand'
         where
@@ -270,50 +274,12 @@ makeTree n val prob' deckState hand = Node (L n val' prob'' hand) $
             availRanks = rank <$> filter ((>0) . freq) (updateDeckState hand deckState)
             prob'' = jointProb prob' hand deckState
             val' = handValue hand
+            deckState' = updateDeckState hand deckState
             terminal = val' == Bust || val' == Combo || val' == Charlie
 
 -- makeTree 5 (Value 5) 1.0 (CardFreq <$> [Ace ..] <*> [numRanks]) []
 -- makeTree 2 (Combo) 1.0 [CardFreq Ace 1, CardFreq Ten 1] []
 -- makeTree 3 (Value 18) 1.0 [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
-
--- Node 2,0P,1.0,[] [
-    -- Node 1,11P,0.5,[SA] 
-    --     [
-    --         Node 0,Combo,0.5,[ST,SA] []
-    --     ],
-    -- Node 1,10P,0.5,[ST] [
-    --     Node 0,Combo,0.5,[SA,ST] []]]
-
--- Node 3,0P,1.0,[] [
---     Node 2,6P,0.25,[S6] [
---         Node 1,14P,8.333333333333333e-2,[S8,S6] [
---             Node 0,Bust,8.333333333333333e-2,[SK,S8,S6] []
---         ],
---         Node 1,16P,0.16666666666666666,[SK,S6] [
---             Node 0,Bust,8.333333333333333e-2,[S8,SK,S6] [],
---             Node 0,Bust,0.0,[SK,SK,S6] []
---         ]
---     ],
---     Node 2,8P,0.25,[S8] [
---         Node 1,14P,8.333333333333333e-2,[S6,S8] [
---             Node 0,Bust,8.333333333333333e-2,[SK,S6,S8] []
---         ],
---         Node 1,18P,0.16666666666666666,[SK,S8] [
---             Node 0,Bust,8.333333333333333e-2,[S6,SK,S8] [],
---             Node 0,Bust,0.0,[SK,SK,S8] []
---         ]
---     ],
---     Node 2,10P,0.5,[SK] [
---         Node 1,16P,0.16666666666666666,[S6,SK] [
---             Node 0,Bust,8.333333333333333e-2,[S8,S6,SK] [],
---             Node 0,Bust,0.0,[SK,S6,SK] []
---         ],
---         Node 1,18P,0.16666666666666666,[S8,SK] [
---             Node 0,Bust,8.333333333333333e-2,[S6,S8,SK] [],
---             Node 0,Bust,0.0,[SK,S8,SK] []
---         ]
---     ]
--- ]
 
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0
@@ -337,8 +303,6 @@ sumTree :: Tree Load -> Double
 sumTree (Node a []) = prob a -- only take probabilities at the leaves
 sumTree (Node _ trees) = sum (sumTree <$> trees) -- + (if total a /= Value 0 then prob a else 1 - prob a) 
 
--- valTree :: HandValue -> Int -> Tree Load -> Double
--- valTree val _ (Node a []) = if total a == val then prob a else 0 -- only take probabilities at the leaves
 valTree :: HandValue -> Tree Load -> Double
 valTree val (Node a trees) = if total a == val then prob a else sum (valTree val <$> trees)
 
