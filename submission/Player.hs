@@ -84,9 +84,9 @@ playCard
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
 playCard upcard points info pid memo hand
-    -- | traceIf (pid == "0") ("id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
+    -- | traceIf (pid == "0") ("\n======================================\n" ++ "id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
     -- | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    -- | traceIf (pid == "0") ("memo: " ++ show memo ++ "\n======================================") False = undefined
+    -- | traceIf (pid == "0") ("memo: " ++ show memo) False = undefined
 
     -- | otherwise
     = let
@@ -105,8 +105,10 @@ Bidding
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
-    | trace ("bid safe " ++ show psafe) pbust > 1/3 = Bid maxBid
-    | pbust < 1/2 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
+-- bid safe borders at 0.3, bid safe' borders at 0.4
+    -- | trace ("bid safe " ++ show psafe ++ "\tbid safe' " ++ show psafe') False = Bid maxBid
+    | psafe' > 4/10 = Bid maxBid
+    | psafe' > 3/10 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     | otherwise = Bid minBid
     -- | combo > 1/3 = Bid maxBid
     -- | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
@@ -120,6 +122,7 @@ makeBid pid points memo
         pbust = jointProbEq Bust ptree -- this is always 0
         p17 = jointProbLt (Value 18) ptree
         psafe = 1 - pbust - p17
+        psafe' = psafe + jointProbLt (Value 12) ptree - jointProbLt (Value 8) ptree
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
