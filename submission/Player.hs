@@ -10,7 +10,7 @@ import           TwentyOne.Types    -- Here you will find types used in the game
 import           TwentyOne.Rules    -- Rules of the game
 
 -- You can add more imports if you need them
-import Debug.Trace
+-- import Debug.Trace
 import Data.List
 import Parser.Instances
 import Data.Char
@@ -93,7 +93,7 @@ playCard upcard points info pid memo hand
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
             Nothing -> makeBid pid points newMemo
-            Just c -> decideAction c hand newMemo
+            Just c -> decideAction c hand pid points newMemo
         finalMemo = updateMemoryAction action newMemo
     in (action, show finalMemo)
 
@@ -107,25 +107,28 @@ makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
 -- bid safe borders at 0.3, bid safe' borders at 0.4
     -- | trace ("bid safe " ++ show psafe ++ "\tbid safe' " ++ show psafe') False = Bid maxBid
-    | psafe' > 4/10 = Bid maxBid
-    | psafe' > 3/10 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
-    | otherwise = Bid minBid
-    -- | combo > 1/3 = Bid maxBid
-    -- | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
-    -- | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
-    --  otherwise = Bid maxBid
+    | psafe > 4/10 = adjustBid maxBid
+    | psafe > 3/10 = adjustBid ((maxBid + minBid) `div` 2)
+    | otherwise = adjustBid minBid
     where
-        -- p = probValueBelow 8 deckState_
-        -- combo = probValue 1 deckState_ * probValue 10 deckState_
-        -- deckState_ = deckState memo
+        adjustBid = Bid . validBid pid points 
         ptree = makeTree 2 Combo (deckState memo) []
         pbust = jointProbEq Bust ptree -- this is always 0
-        p17 = jointProbLt (Value 18) ptree
-        psafe = 1 - pbust - p17
-        psafe' = psafe + jointProbLt (Value 12) ptree - jointProbLt (Value 8) ptree
+        pLt18 = jointProbLt (Value 18) ptree
+        pLt12 = jointProbLt (Value 12) ptree
+        pLt8 = jointProbLt (Value 8) ptree
+        psafe = 1 - pbust - pLt18 + pLt12 - pLt8
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
+
+validBid :: PlayerId -> [PlayerPoints] -> Points -> Points
+validBid pid points bid
+    | pts < minBid = pts
+    | pts > maxBid = min maxBid bid
+    | bid > pts = pts
+    | otherwise = bid
+    where pts = getPoint pid points
 
 
 
@@ -133,22 +136,23 @@ getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId)
 Actions
 ---------------------------------}
 
-decideAction :: Card -> [Card] -> Memory -> Action
-decideAction upcard hand memo = case take 2 $ lastActions memo of
+decideAction :: Card -> [Card] -> PlayerId -> [PlayerPoints] -> Memory -> Action
+decideAction upcard hand pid points memo = case take 2 $ lastActions memo of
     [Bid _] -> case upcard of
         Card _ Ace -> if dcombo > 2/3
-            then Insurance (max minBid $ currBid memo)
-            else doubleOrSplit upcard hand memo
-        _ -> doubleOrSplit upcard hand memo
+            then Insurance (validBid pid points $ currBid memo `div` 2)
+            else altAction
+        _ -> altAction
     [DoubleDown _, _] -> Hit
     [Hit, DoubleDown _] -> Stand
-    _ -> doubleOrSplit upcard hand memo
+    _ -> altAction
     where
         dtree = makeTree 1 Combo (deckState memo) [upcard]
         dcombo = jointProbEq Combo dtree
+        altAction = doubleOrSplit upcard hand pid points memo
 
-doubleOrSplit :: Card -> [Card] -> Memory -> Action
-doubleOrSplit upcard hand memo
+doubleOrSplit :: Card -> [Card] -> PlayerId -> [PlayerPoints] -> Memory -> Action
+doubleOrSplit upcard hand pid points memo
     | length hand /= 2 = hitOrStand upcard hand memo
 
     -- Double
@@ -159,19 +163,20 @@ doubleOrSplit upcard hand memo
     
     | otherwise = hitOrStand upcard hand memo
         where 
-            bid = max minBid $ currBid memo
+            bid = validBid pid points $ currBid memo
             ptree = makeTree 1 Combo (deckState memo) hand
             pbust = jointProbEq Bust ptree
-            p17 = jointProbLt (Value 18) ptree
-            psafe = 1 - pbust - p17
+            pLt18 = jointProbLt (Value 18) ptree
+            psafe = 1 - pbust - pLt18
 
 -- Hit Stand DoubleDown Split
 hitOrStand :: Card -> [Card] -> Memory -> Action
 hitOrStand upcard hand memo
     -- | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
     | handValue hand <= Value 11 = Hit
+    -- | handValue hand <= Value 14 && pbust <= 2/3 = Hit
     | pbust <= 1/2 = Hit
-    | dbust > 2/3 && dbust > pbust = Hit
+    | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
     where
         deckState_ = deckState memo
@@ -189,7 +194,7 @@ Memory Maintainance
 deserialise :: Maybe String -> Memory
 deserialise memo = case parse parseMemory <$> memo of
     Just (Result _ m) -> m
-    Just (Error _) -> trace "Error occured in deserialising memory!" initMemory
+    Just (Error _) -> initMemory -- trace "Error occured in deserialising memory!" 
     Nothing -> initMemory
 
 updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
@@ -421,9 +426,9 @@ Utility
 initMemory :: Memory
 initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing
 
-traceIf :: Bool -> String -> p -> p
-traceIf True  s x = trace s x
-traceIf False _ x = x
+-- traceIf :: Bool -> String -> p -> p
+-- traceIf True  s x = trace s x
+-- traceIf False _ x = x
 
 filter' :: (a -> Bool) -> [a] -> ([a], [a])
 filter' f alist = (filter f alist, filter (not . f) alist)
