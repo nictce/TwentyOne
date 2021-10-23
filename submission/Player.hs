@@ -136,13 +136,16 @@ Actions
 decideAction :: Card -> [Card] -> Memory -> Action
 decideAction upcard hand memo = case take 2 $ lastActions memo of
     [Bid _] -> case upcard of
-        Card _ Ace -> if probValue 10 (deckState memo) > 2/3
+        Card _ Ace -> if dcombo > 2/3
             then Insurance (max minBid $ currBid memo)
             else doubleOrSplit upcard hand memo
         _ -> doubleOrSplit upcard hand memo
     [DoubleDown _, _] -> Hit
     [Hit, DoubleDown _] -> Stand
     _ -> doubleOrSplit upcard hand memo
+    where
+        dtree = makeTree 1 Combo (deckState memo) [upcard]
+        dcombo = jointProbEq Combo dtree
 
 doubleOrSplit :: Card -> [Card] -> Memory -> Action
 doubleOrSplit upcard hand memo
@@ -165,34 +168,17 @@ doubleOrSplit upcard hand memo
 -- Hit Stand DoubleDown Split
 hitOrStand :: Card -> [Card] -> Memory -> Action
 hitOrStand upcard hand memo
-    | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
-    | phand <= Value 11 = Hit
-    -- | pbust >= 1/2 = Stand -- try this
-    | psafe > 1/2 = Hit
+    -- | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
+    | handValue hand <= Value 11 = Hit
+    | pbust <= 1/2 = Hit
     | dbust > 2/3 && dbust > pbust = Hit
-    -- | psafe > 1/2 && length hand == 2 = DoubleDown $ currBid memo
-    -- | psafe > 1/3 = Hit
-    -- | dsafe < 1/3 && phand >= Value 19 && phand > dhand = Stand
-    -- | diff > -1/3 = Hit
-    -- | diff <= -1/3 = Stand
     | otherwise = Stand
     where
-        -- p = probValueBelow (targetValue - phand) deckState'
-        -- d = probValueBelow (targetValue - dhand) deckState'
-        phand = handValue hand
-        -- dhand = handValue [upcard]
-        -- diff = p - d
-        deckState' = deckState memo
-        ptree = makeTree 1 Combo deckState' hand
+        deckState_ = deckState memo
+        ptree = makeTree 1 Combo deckState_ hand
         pbust = jointProbEq Bust ptree
-        psafe = 1 - pbust
-        dtree = makeTree 4 (Value 17) deckState' [upcard]
+        dtree = makeTree 4 (Value 17) deckState_ [upcard]
         dbust = jointProbEq Bust dtree
-        dsafe = 1 - dbust
-
--- makeTree 4 (Value 16) deckState [upcard] -- dealer
--- makeTree (5 - length hand) Combo deckState hand -- player
--- makeTree 5 (Combo) (CardFreq <$> [Ace ..] <*> [numRanks]) []
 
 
 
@@ -200,26 +186,26 @@ hitOrStand upcard hand memo
 Deck Statistics
 ---------------------------------}
 
-probValueBelow :: Int -> [CardFreq] -> Double
-probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
+-- probValueBelow :: Int -> [CardFreq] -> Double
+-- probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
 
-probValue :: Int -> [CardFreq] -> Double
-probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
+-- probValue :: Int -> [CardFreq] -> Double
+-- probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
 
-cardsBelow :: Int -> [CardFreq] -> Int
-cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
+-- cardsBelow :: Int -> [CardFreq] -> Int
+-- cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
 
-cardsEq :: Int -> [CardFreq] -> Int
-cardsEq val = foldr (\v a -> if rankValue (rank v) == val then a + freq v else a) 0
+-- cardsEq :: Int -> [CardFreq] -> Int
+-- cardsEq val = foldr (\v a -> if rankValue (rank v) == val then a + freq v else a) 0
 
 totalCards :: [CardFreq] -> Int
 totalCards = foldr (\v a -> a + freq v) 0
 
-rankValue :: Rank -> Int
-rankValue rank
-    --  rank == Ace = 11
-    | rank < Jack = fromEnum rank + 1
-    | otherwise   = 10
+-- rankValue :: Rank -> Int
+-- rankValue rank
+--     --  rank == Ace = 11
+--     | rank < Jack = fromEnum rank + 1
+--     | otherwise   = 10
 
 -- calculates the probability of the dealer's hidden card (below 17?)
 -- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
@@ -310,11 +296,10 @@ Tree
 
 makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
 makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
-    makeTree_ (n-1) maxVal 1.0 deckState <$> newHand
-    where
-        newHand = possHands deckState hand
+    makeTree_ (n-1) maxVal 1.0 deckState <$> newHands
+    where newHands = possHands deckState hand
         -- availRanks = rank <$> filter ((>0) . freq) deckState
-        -- newHand = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
+        -- newHands = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
 
 makeTree_ :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
 makeTree_ 0 _ prob' deckState hand = Node (L 0 newTotal newProb hand) []
@@ -323,14 +308,14 @@ makeTree_ 0 _ prob' deckState hand = Node (L 0 newTotal newProb hand) []
         newProb = jointProb prob' hand deckState
 makeTree_ n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
     if terminal then [] 
-    else makeTree_ (n-1) maxVal newProb newDeckState <$> newHand
-        where
-            newTotal = handValue hand
-            terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie || newTotal >= maxVal
+    else makeTree_ (n-1) maxVal newProb newDeckState <$> newHands
+    where
+        newTotal = handValue hand
+        terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie || newTotal >= maxVal
 
-            newProb = jointProb prob' hand deckState -- newProb is with new head
-            newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
-            newHand = possHands newDeckState hand
+        newProb = jointProb prob' hand deckState -- newProb is with new head
+        newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
+        newHands = possHands newDeckState hand
 
 possHands :: [CardFreq] -> [Card] -> [[Card]]
 possHands deckState hand = (:hand) <$> (Card Spade <$> availableRanks)
