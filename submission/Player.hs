@@ -14,6 +14,7 @@ import Debug.Trace
 import Data.List
 import Parser.Instances
 import Data.Char
+import TwentyOne.Play (dealerId)
 
 
 
@@ -104,14 +105,21 @@ Bidding
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
-    | combo > 1/3 = Bid maxBid
-    | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
-    | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
+    | pbust < 3/10 = Bid maxBid
+    | pbust < 5/10 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
+    | otherwise = Bid minBid
+    -- | combo > 1/3 = Bid maxBid
+    -- | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
+    -- | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     --  otherwise = Bid maxBid
     where
         p = probValueBelow 8 deckState_
         combo = probValue 1 deckState_ * probValue 10 deckState_
         deckState_ = deckState memo
+        ptree = makeTree 1 Combo (deckState memo) []
+        pbust = jointProbEq Bust ptree
+        p17 = jointProbLt (Value 18) ptree
+        psafe = 1 - pbust - p17
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
@@ -124,45 +132,62 @@ Actions
 
 decideAction :: Card -> [Card] -> Memory -> Action
 decideAction upcard hand memo = case take 2 $ lastActions memo of
-    [Bid _] -> decide2nd upcard hand memo
+    [Bid _] -> case upcard of
+        Card _ Ace -> if probValue 10 (deckState memo) > 2/3
+            then Insurance (max minBid $ currBid memo)
+            else decide2Cards upcard hand memo
+        _ -> decide2Cards upcard hand memo
     [DoubleDown _, _] -> Hit
     [Hit, DoubleDown _] -> Stand
     _ -> playHand upcard hand memo
 
-decide2nd :: Card -> [Card] -> Memory -> Action
-decide2nd upcard hand memo
-    -- Double
-    | handCalc hand == 11 = DoubleDown bid
-    -- Split
-    | getRank (head hand) == getRank (head (tail hand)) &&
-      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
-    -- Insurance -- must 1/2 or put bid??
-    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2/3
-        then Insurance bid
-        else playHand upcard hand memo
+decide2Cards :: Card -> [Card] -> Memory -> Action
+decide2Cards upcard hand memo
+    | length hand /= 2 = playHand upcard hand memo
 
+    -- Double
+    | psafe > 3/10 || handValue hand == Value 11 = DoubleDown bid
+    -- Split
+    | getRank (head hand) == getRank (last hand) &&
+      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
+    
     | otherwise = playHand upcard hand memo
-    where bid = max minBid $ currBid memo
+        where 
+            bid = max minBid $ currBid memo
+            ptree = makeTree 1 Combo (deckState memo) hand
+            pbust = jointProbEq Bust ptree
+            p17 = jointProbLt (Value 18) ptree
+            psafe = 1 - pbust - p17
 
 -- Hit Stand DoubleDown Split
 playHand :: Card -> [Card] -> Memory -> Action
 playHand upcard hand memo
-    | phand < 11 = Hit
-    | trace ("" ++ show treeprob) treeprob > 1/3 = Hit
-    | p > 1/2 && length hand == 2 = DoubleDown $ currBid memo
-    | p > 1/3 = Hit
-    | d < 1/3 && phand >= 19 && phand > dhand = Stand
-    | diff > -1/3 = Hit
-    | diff <= -1/3 = Stand
-    | otherwise = Stand
+    | phand < Value 11 = Hit
+    | trace ("" ++ show pbust) pbust >= 1/2 = Stand --
+    | psafe > 3/10 = Hit
+    -- | psafe > 1/2 && length hand == 2 = DoubleDown $ currBid memo
+    -- | psafe > 1/3 = Hit
+    -- | dsafe < 1/3 && phand >= Value 19 && phand > dhand = Stand
+    -- | diff > -1/3 = Hit
+    -- | diff <= -1/3 = Stand
+    | otherwise = Hit
     where
-        p = probValueBelow (targetValue - phand) (deckState memo)
-        d = probValueBelow (targetValue - dhand) (deckState memo)
-        phand = handCalc hand
-        dhand = handCalc [upcard]
-        tree = makeTree (5 - length hand) Combo (deckState memo) hand
-        diff = p - d
-        treeprob = jointProbEq Charlie tree + jointProbEq (Value 21) tree
+        -- p = probValueBelow (targetValue - phand) deckState'
+        -- d = probValueBelow (targetValue - dhand) deckState'
+        phand = handValue hand
+        dhand = handValue [upcard]
+        -- diff = p - d
+        deckState' = deckState memo
+        ptree = makeTree 1 Combo deckState' hand
+        pbust = jointProbEq Bust ptree
+        psafe = 1 - pbust
+        dtree = makeTree 4 (Value 16) deckState' [upcard]
+        dbust = jointProbEq Bust dtree
+        dsafe = 1 - dbust
+
+-- makeTree 4 (Value 16) deckState [upcard] -- dealer
+-- makeTree (5 - length hand) Combo deckState hand -- player
+-- makeTree 5 (Combo) (CardFreq <$> [Ace ..] <*> [numRanks]) []
 
 
 
@@ -203,8 +228,8 @@ rankValue rank
 
 -- probWin :: [Card] -> Card -> [CardFreq] -> Double
 -- probWin hand _ deckState = let
---     p = handCalc hand
---     -- d = handCalc [upcard]
+--     p = handValue hand
+--     -- d = handValue [upcard]
 --     -- probPNotBust = 
 --     in probValueBelow p deckState
 
@@ -258,7 +283,7 @@ getNewCards pid upcard info hand memo = let
 
         Just c -> case lastAction of
             -- second turn    !!! TODO: removes dealers hand - bug?
-            Bid _ -> [c] ++ concat (playerInfoHand <$> filter (("dealer" /=) . _playerInfoId) info) ++ hand
+            Bid _ -> [c] ++ concat (playerInfoHand <$> filter ((dealerId /=) . _playerInfoId) info) ++ hand
             -- >= second turn
             _ -> [head hand]
 
@@ -334,10 +359,6 @@ jointProbEq val (Node _ trees) = sum (jointProbEq val <$> trees)
 jointProbBottom :: HandValue -> Tree Load -> Double
 jointProbBottom val (Node a []) = if total a == val && len a == 0 then prob a else 0
 jointProbBottom val (Node _ trees) = sum (jointProbBottom val <$> trees)
-
--- makeTree 4 (Value 16) deckState [upcard] -- dealer
--- makeTree (5 - length hand) Combo deckState hand -- player
--- makeTree 5 (Combo) (CardFreq <$> [Ace ..] <*> [numRanks]) []
 
 
 
