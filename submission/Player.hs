@@ -16,6 +16,7 @@ import Parser.Instances
 import Data.Char
 
 
+
 {---------------------------------
 Declarations
 ---------------------------------}
@@ -47,7 +48,37 @@ instance Show CardFreq where
 -- instance Functor CardFreq where
 --     fmap f (CardFreq rank freq) = CardFreq rank $ f freq
 
+data Tree a = Node a [Tree a] -- | Leaf a 
+    deriving (Show)
 
+data Load = L {
+    len :: Int,
+    total :: HandValue, -- total value of combination of ranks
+    prob :: Double, -- probability of getting to that node from combination of ranks
+    ranks :: Hand
+}
+
+instance Show Load where
+    show l = intercalate "," values where
+        show_ f = show (f l)
+        values = [
+            show_ len,
+            show_ total,
+            show_ prob,
+            show_ ranks]
+
+-- instance Foldable Tree where
+--     foldMap f (Node a []) = f a
+--     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
+
+-- instance Functor Load where
+--     fmap f l = f $ prob l
+
+
+
+{---------------------------------
+playCard
+---------------------------------}
 
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
@@ -64,6 +95,7 @@ playCard upcard points info pid memo hand
             Just c -> decideAction c hand newMemo
         finalMemo = updateMemoryAction action newMemo
     in (action, show finalMemo)
+
 
 
 {---------------------------------
@@ -83,6 +115,7 @@ makeBid pid points memo
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
+
 
 
 {---------------------------------
@@ -131,6 +164,8 @@ playHand upcard hand memo
         diff = p - d
         treeprob = jointProbEq Charlie tree + jointProbEq (Value 21) tree
 
+
+
 {---------------------------------
 Deck Statistics
 ---------------------------------}
@@ -172,6 +207,7 @@ rankValue rank
 --     -- d = handCalc [upcard]
 --     -- probPNotBust = 
 --     in probValueBelow p deckState
+
 
 
 {---------------------------------
@@ -242,37 +278,11 @@ includePlayerHead pid info = let
 Tree
 ---------------------------------}
 
-data Tree a = Node a [Tree a] -- | Leaf a 
-    deriving (Show)
-
-data Load = L {
-    len :: Int,
-    total :: HandValue, -- total value of combination of ranks
-    prob :: Double, -- probability of getting to that node from combination of ranks
-    ranks :: Hand
-}
-
-instance Show Load where
-    show l = intercalate "," values where
-        show_ f = show (f l)
-        values = [
-            show_ len,
-            show_ total,
-            show_ prob,
-            show_ ranks]
-
--- instance Foldable Tree where
---     foldMap f (Node a []) = f a
---     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
-
--- instance Functor Load where
---     fmap f l = f $ prob l
-
 makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
 makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
     makeTree_ (n-1) maxVal 1.0 deckState <$> newHand
     where
-        newHand = possHands maxVal deckState hand
+        newHand = possHands deckState hand
         -- availRanks = rank <$> filter ((>0) . freq) deckState
         -- newHand = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
 
@@ -290,14 +300,11 @@ makeTree_ n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
 
             newProb = jointProb prob' hand deckState -- newProb is with new head
             newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
-            newHand = possHands maxVal newDeckState hand
+            newHand = possHands newDeckState hand
 
-possHands :: HandValue -> [CardFreq] -> [Card] -> [[Card]]
-possHands maxVal deckState hand = handsLTmaxVal
-    where
-        availableRanks = rank <$> filter ((>0) . freq) deckState
-        -- handsLTmaxVal = foldr (\v a -> if handValue (v:hand) <= maxVal then (v:hand):a else a) [] (Card Spade <$> availableRanks)
-        handsLTmaxVal = (:hand) <$> (Card Spade <$> availableRanks)
+possHands :: [CardFreq] -> [Card] -> [[Card]]
+possHands deckState hand = (:hand) <$> (Card Spade <$> availableRanks)
+    where availableRanks = rank <$> filter ((>0) . freq) deckState
 
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0 -- base probability starts from 1
@@ -312,12 +319,6 @@ rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
 sumTree :: Tree Load -> Double
 sumTree (Node a []) = prob a -- only take probabilities at the leaves
 sumTree (Node _ trees) = sum (sumTree <$> trees)
-
--- finds probability of val at every node of the tree
--- jointProbEq :: HandValue -> Tree Load -> Double
--- jointProbEq val (Node a trees)
---     | total a == val = prob a
---     | otherwise = sum (jointProbEq val <$> trees)
 
 -- finds probability less than val at every leaf (at any level) of the tree
 jointProbLt :: HandValue -> Tree Load -> Double
@@ -336,20 +337,7 @@ jointProbBottom val (Node _ trees) = sum (jointProbBottom val <$> trees)
 
 -- makeTree 4 (Value 16) deckState [upcard] -- dealer
 -- makeTree (5 - length hand) Combo deckState hand -- player
-
--- makeTree 5 (Value 5) (CardFreq <$> [Ace ..] <*> [numRanks]) []
 -- makeTree 5 (Combo) (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree 4 (Combo) (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree 5 Combo (CardFreq <$> [Ace ..] <*> [numRanks]) []
--- makeTree 2 (Combo) [CardFreq Ace 1, CardFreq Ten 1] []
--- makeTree 3 (Value 18) [CardFreq Six 1, CardFreq Eight 1, CardFreq King 2] []
--- makeTree 3 (Combo) [CardFreq Six 2, CardFreq Four 2, CardFreq Six 2] [Card Spade Two]
-
--- jointProbBelow :: HandValue -> Tree Load -> Double
--- jointProbBelow val (Node a trees)
---     | total a < val = prob a + sum (valTree val <$> trees)
---     | total a == val = prob a
---     | otherwise = 0
 
 
 
