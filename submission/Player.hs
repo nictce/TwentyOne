@@ -26,7 +26,8 @@ data Memory = Memory {
     currBid :: Int,
     deckState :: [CardFreq],
     lastActions :: [Action],
-    lastUpcard :: Maybe Card
+    lastUpcard :: Maybe Card,
+    hiddenCard :: Int
 }
 
 data CardFreq = CardFreq {
@@ -41,7 +42,8 @@ instance Show Memory where
             show_ currBid,
             show_ deckState,
             show_ lastActions,
-            show_ lastUpcard]
+            show_ lastUpcard,
+            show_ hiddenCard]
 
 instance Show CardFreq where
     show cf = show (rank cf) ++ ":" ++ show (freq cf)
@@ -112,7 +114,7 @@ makeBid pid points memo
     | otherwise = adjustBid minBid
     where
         adjustBid = Bid . validBid pid points 
-        ptree = makeTree 2 Combo (deckState memo) []
+        ptree = makeTree 2 Combo memo []
         pbust = jointProbEq Bust ptree -- this is always 0
         pLt18 = jointProbLt (Value 18) ptree
         pLt12 = jointProbLt (Value 12) ptree
@@ -147,7 +149,7 @@ decideAction upcard hand pid points memo = case take 2 $ lastActions memo of
     [Hit, DoubleDown _] -> Stand
     _ -> altAction
     where
-        dtree = makeTree 1 Combo (deckState memo) [upcard]
+        dtree = makeTree 1 Combo memo [upcard]
         dcombo = jointProbEq Combo dtree
         altAction = doubleOrSplit upcard hand pid points memo
 
@@ -164,7 +166,7 @@ doubleOrSplit upcard hand pid points memo
     | otherwise = hitOrStand upcard hand memo
         where 
             bid = validBid pid points $ currBid memo
-            ptree = makeTree 1 Combo (deckState memo) hand
+            ptree = makeTree 1 Combo memo hand
             pbust = jointProbEq Bust ptree
             pLt18 = jointProbLt (Value 18) ptree
             psafe = 1 - pbust - pLt18
@@ -179,10 +181,9 @@ hitOrStand upcard hand memo
     | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
     where
-        deckState_ = deckState memo
-        ptree = makeTree 1 Combo deckState_ hand
+        ptree = makeTree 1 Combo memo hand
         pbust = jointProbEq Bust ptree
-        dtree = makeTree 4 (Value 17) deckState_ [upcard]
+        dtree = makeTree 4 (Value 17) memo [upcard]
         dbust = jointProbEq Bust dtree
 
 
@@ -194,14 +195,14 @@ Memory Maintainance
 deserialise :: Maybe String -> Memory
 deserialise memo = case parse parseMemory <$> memo of
     Just (Result _ m) -> m
-    Just (Error _) -> initMemory -- trace "Error occured in deserialising memory!" 
-    Nothing -> initMemory
+    _ -> initMemory 
 
 updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
 updateMemoryInfo upcard pid info hand oldMemo =
     oldMemo {
         deckState = updateDeckState newCards (deckState oldMemo),
-        lastUpcard = upcard
+        lastUpcard = upcard,
+        hiddenCard = hiddenCard oldMemo + dealerHiddenCard info upcard
     }
     where newCards = getNewCards pid upcard info hand oldMemo
 
@@ -221,6 +222,11 @@ checkDeck :: [CardFreq] -> [CardFreq]
 checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >) . freq) deckState then
     map (\ v -> CardFreq (rank v) (freq v + numRanks)) deckState else deckState
 
+dealerHiddenCard :: [PlayerInfo] -> Maybe Card -> Int
+dealerHiddenCard info upcard = case upcard of 
+    Nothing -> if null dealerList then 0 else 1
+    _ -> 0
+    where dealerList = filter (\d -> _playerInfoId d == dealerId && length (playerInfoHand d) == 1) info
 
 getNewCards :: PlayerId -> Maybe Card -> [PlayerInfo] -> Hand -> Memory -> [Card]
 getNewCards pid upcard info hand memo = let
@@ -255,30 +261,31 @@ includePlayerHead pid info = let
 Tree and Deck Statistics
 ---------------------------------}
 
-makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
-makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
-    makeTree_ (n-1) maxVal 1.0 deckState <$> newHands
-    where newHands = possHands deckState hand
+makeTree :: Int -> HandValue -> Memory -> Hand -> Tree Load
+makeTree n maxVal memo hand = Node (L n (handValue hand) 1.0 hand) $
+    makeTree_ (n-1) maxVal 1.0 memo <$> newHands
+    where newHands = possHands (deckState memo) hand
 
-makeTree_ :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
-makeTree_ 0 _ prob' deckState hand = Node (L 0 newTotal newProb hand) []
+makeTree_ :: Int -> HandValue -> Double -> Memory -> Hand -> Tree Load
+makeTree_ 0 _ prob' memo hand = Node (L 0 newTotal newProb hand) []
     where
         newTotal = handValue hand
-        newProb = jointProb prob' hand deckState
-makeTree_ n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
+        newProb = jointProb prob' hand (deckState memo) (hiddenCard memo)
+makeTree_ n maxVal prob' memo hand = Node (L n newTotal newProb hand) $
     if terminal then [] 
-    else makeTree_ (n-1) maxVal newProb newDeckState <$> newHands
+    else makeTree_ (n-1) maxVal newProb (memo {deckState = newDeckState}) <$> newHands
     where
         newTotal = handValue hand
         terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie || newTotal >= maxVal
 
-        newProb = jointProb prob' hand deckState -- newProb is with new head
-        newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
+        newProb = jointProb prob' hand oldDeckState (hiddenCard memo) -- newProb is with new head
+        oldDeckState = deckState memo
+        newDeckState = if null hand then oldDeckState else updateDeckState [head hand] oldDeckState
         newHands = possHands newDeckState hand
 
-jointProb :: Double -> [Card] -> [CardFreq] -> Double
-jointProb _ [] _ = 1.0 -- base probability starts from 1
-jointProb prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState) * prob'
+jointProb :: Double -> [Card] -> [CardFreq] -> Int -> Double
+jointProb _ [] _ _ = 1.0 -- base probability starts from 1
+jointProb prob' hand deckState hiddenCard = fromIntegral numOfRank / fromIntegral (totalCards deckState + hiddenCard) * prob'
     where
         rank' = getRank (head hand)
         numOfRank = rankEq rank' deckState
@@ -346,7 +353,9 @@ parseMemory = do
     actions <- parseList parseAction_
     _ <- commaTok
     card <- parseMaybeCard
-    pure $ Memory bid deck actions card
+    _ <- commaTok
+    hidden <- parseInt
+    pure $ Memory bid deck actions card hidden
 
 parseCardFreq :: Parser CardFreq
 parseCardFreq = do
@@ -424,7 +433,7 @@ Utility
 ---------------------------------}
 
 initMemory :: Memory
-initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing
+initMemory = Memory 0 (CardFreq <$> [Ace ..] <*> [numRanks]) [Stand] Nothing 0
 
 -- traceIf :: Bool -> String -> p -> p
 -- traceIf True  s x = trace s x
