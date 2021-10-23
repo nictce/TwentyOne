@@ -15,6 +15,7 @@ import Data.List
 import Parser.Instances
 import Data.Char
 import TwentyOne.Play (dealerId)
+import TwentyOne.Types (PlayerPoints(PlayerPoints))
 
 
 
@@ -70,6 +71,12 @@ instance Show Load where
             show_ prob,
             show_ ranks]
 
+instance Eq PlayerPoints where
+    (PlayerPoints _ p1) == (PlayerPoints _ p2) = p1 == p2
+
+instance Ord PlayerPoints where
+    (PlayerPoints _ p1) `compare` (PlayerPoints _ p2) = p1 `compare` p2
+
 -- instance Foldable Tree where
 --     foldMap f (Node a []) = f a
 --     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
@@ -109,8 +116,9 @@ makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
 -- bid safe borders at 0.3, bid safe' borders at 0.4
     -- | trace ("bid safe " ++ show psafe ++ "\tbid safe' " ++ show psafe') False = Bid maxBid
-    | psafe > 4/10 = adjustBid maxBid
-    | psafe > 3/10 = adjustBid ((maxBid + minBid) `div` 2)
+    -- | trace ("blw: " ++ show blw ++ "\tabv: " ++ show abv) False = undefined
+    | psafe > 4/10 = adjustBid $ min maxBid $ max blw maxBid
+    | psafe > 3/10 = adjustBid $ max minBid $ min abv ((maxBid + minBid) `div` 2)
     | otherwise = adjustBid minBid
     where
         adjustBid = Bid . validBid pid points 
@@ -120,6 +128,18 @@ makeBid pid points memo
         pLt12 = jointProbLt (Value 12) ptree
         pLt8 = jointProbLt (Value 8) ptree
         psafe = 1 - pbust - pLt18 + pLt12 - pLt8
+        (blw, abv) = determineBidBounds pid points
+
+determineBidBounds :: PlayerId -> [PlayerPoints] -> (Points, Points)
+determineBidBounds pid points = (point - blw, abv - point)
+    where 
+        sortedPoints = sort points
+        point = getPoint pid points
+        abv = _playerPoints $ foldr1 (\v a -> if _playerPoints v > point && v < a then v else a) sortedPoints
+        blw = _playerPoints $ foldl1 (\a v -> if _playerPoints v < point && v > a then v else a) sortedPoints
+
+-- [PlayerPoints "0" 7, PlayerPoints "1" 8, PlayerPoints "2" 2, PlayerPoints "9" 7, PlayerPoints "8" 4, PlayerPoints "3" 0]
+-- [PlayerPoints "0" 7, PlayerPoints "1" 7, PlayerPoints "2" 7, PlayerPoints "9" 7, PlayerPoints "8" 7, PlayerPoints "3" 7]
 
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
