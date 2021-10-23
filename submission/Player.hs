@@ -115,9 +115,9 @@ makeBid pid points memo
     -- | otherwise = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     --  otherwise = Bid maxBid
     where
-        p = probValueBelow 8 deckState_
-        combo = probValue 1 deckState_ * probValue 10 deckState_
-        deckState_ = deckState memo
+        -- p = probValueBelow 8 deckState_
+        -- combo = probValue 1 deckState_ * probValue 10 deckState_
+        -- deckState_ = deckState memo
         ptree = makeTree 2 Combo (deckState memo) []
         pbust = jointProbEq Bust ptree -- this is always 0
         p17 = jointProbLt (Value 18) ptree
@@ -165,26 +165,28 @@ doubleOrSplit upcard hand memo
 -- Hit Stand DoubleDown Split
 hitOrStand :: Card -> [Card] -> Memory -> Action
 hitOrStand upcard hand memo
-    | phand < Value 11 = Hit
-    | trace ("bid bust " ++ show pbust) pbust >= 1/2 = Stand --
-    | psafe > 1/3 = Hit
+    | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
+    | phand <= Value 11 = Hit
+    -- | pbust >= 1/2 = Stand -- try this
+    | psafe > 1/2 = Hit
+    | dbust > 2/3 && dbust > pbust = Hit
     -- | psafe > 1/2 && length hand == 2 = DoubleDown $ currBid memo
     -- | psafe > 1/3 = Hit
     -- | dsafe < 1/3 && phand >= Value 19 && phand > dhand = Stand
     -- | diff > -1/3 = Hit
     -- | diff <= -1/3 = Stand
-    | otherwise = Hit
+    | otherwise = Stand
     where
         -- p = probValueBelow (targetValue - phand) deckState'
         -- d = probValueBelow (targetValue - dhand) deckState'
         phand = handValue hand
-        dhand = handValue [upcard]
+        -- dhand = handValue [upcard]
         -- diff = p - d
         deckState' = deckState memo
         ptree = makeTree 1 Combo deckState' hand
         pbust = jointProbEq Bust ptree
         psafe = 1 - pbust
-        dtree = makeTree 4 (Value 16) deckState' [upcard]
+        dtree = makeTree 4 (Value 17) deckState' [upcard]
         dbust = jointProbEq Bust dtree
         dsafe = 1 - dbust
 
