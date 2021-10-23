@@ -183,50 +183,6 @@ hitOrStand upcard hand memo
 
 
 {---------------------------------
-Deck Statistics
----------------------------------}
-
--- probValueBelow :: Int -> [CardFreq] -> Double
--- probValueBelow val deckState = fromIntegral (cardsBelow val deckState) / fromIntegral (totalCards deckState)
-
--- probValue :: Int -> [CardFreq] -> Double
--- probValue val deckState = fromIntegral (foldr (\v a -> if rankValue (rank v) == val then freq v else a) 0 deckState) / fromIntegral (totalCards deckState)
-
--- cardsBelow :: Int -> [CardFreq] -> Int
--- cardsBelow val = foldr (\v a -> if rankValue (rank v) <= val then a + freq v else a) 0
-
--- cardsEq :: Int -> [CardFreq] -> Int
--- cardsEq val = foldr (\v a -> if rankValue (rank v) == val then a + freq v else a) 0
-
-totalCards :: [CardFreq] -> Int
-totalCards = foldr (\v a -> a + freq v) 0
-
--- rankValue :: Rank -> Int
--- rankValue rank
---     --  rank == Ace = 11
---     | rank < Jack = fromEnum rank + 1
---     | otherwise   = 10
-
--- calculates the probability of the dealer's hidden card (below 17?)
--- dlrHcProb :: [CardFreq] -> Int -> Int -> Float
--- dlrHcProb deckState players upcardVal = if dlrNewDeck deckState players then 
---     probValueBelow upcardVal (map (\x -> if (freq x - numRanks) > 0 then CardFreq (rank x) (freq x - 12) else CardFreq (rank x) 0) deckState) else 
---     probValueBelow upcardVal deckState
-
--- finds whether the dealer's hidden card is from a new deck
--- dlrNewDeck :: [CardFreq] -> Int -> Bool -- numPlayers or next players before dealer
--- dlrNewDeck deckState players = startingNumCards * players >= totalCards deckState
-
--- probWin :: [Card] -> Card -> [CardFreq] -> Double
--- probWin hand _ deckState = let
---     p = handValue hand
---     -- d = handValue [upcard]
---     -- probPNotBust = 
---     in probValueBelow p deckState
-
-
-
-{---------------------------------
 Memory Maintainance
 ---------------------------------}
 
@@ -291,15 +247,13 @@ includePlayerHead pid info = let
 
 
 {---------------------------------
-Tree
+Tree and Deck Statistics
 ---------------------------------}
 
 makeTree :: Int -> HandValue -> [CardFreq] -> Hand -> Tree Load
 makeTree n maxVal deckState hand = Node (L n (handValue hand) 1.0 hand) $
     makeTree_ (n-1) maxVal 1.0 deckState <$> newHands
     where newHands = possHands deckState hand
-        -- availRanks = rank <$> filter ((>0) . freq) deckState
-        -- newHands = (:hand) <$> filter ((maxVal >=) . handValue . (:hand)) (Card Spade <$> availRanks)
 
 makeTree_ :: Int -> HandValue -> Double -> [CardFreq] -> Hand -> Tree Load
 makeTree_ 0 _ prob' deckState hand = Node (L 0 newTotal newProb hand) []
@@ -317,10 +271,6 @@ makeTree_ n maxVal prob' deckState hand = Node (L n newTotal newProb hand) $
         newDeckState = if null hand then deckState else updateDeckState [head hand] deckState
         newHands = possHands newDeckState hand
 
-possHands :: [CardFreq] -> [Card] -> [[Card]]
-possHands deckState hand = (:hand) <$> (Card Spade <$> availableRanks)
-    where availableRanks = rank <$> filter ((>0) . freq) deckState
-
 jointProb :: Double -> [Card] -> [CardFreq] -> Double
 jointProb _ [] _ = 1.0 -- base probability starts from 1
 jointProb prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCards deckState) * prob'
@@ -328,8 +278,9 @@ jointProb prob' hand deckState = fromIntegral numOfRank / fromIntegral (totalCar
         rank' = getRank (head hand)
         numOfRank = rankEq rank' deckState
 
-rankEq :: Rank -> [CardFreq] -> Int
-rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
+possHands :: [CardFreq] -> [Card] -> [[Card]]
+possHands deckState hand = (:hand) <$> (Card Spade <$> availableRanks)
+    where availableRanks = rank <$> filter ((>0) . freq) deckState
 
 sumTree :: Tree Load -> Double
 sumTree (Node a []) = prob a -- only take probabilities at the leaves
@@ -349,6 +300,12 @@ jointProbEq val (Node _ trees) = sum (jointProbEq val <$> trees)
 jointProbBottom :: HandValue -> Tree Load -> Double
 jointProbBottom val (Node a []) = if total a == val && len a == 0 then prob a else 0
 jointProbBottom val (Node _ trees) = sum (jointProbBottom val <$> trees)
+
+rankEq :: Rank -> [CardFreq] -> Int
+rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
+
+totalCards :: [CardFreq] -> Int
+totalCards = foldr (\v a -> a + freq v) 0
 
 
 
@@ -473,10 +430,6 @@ filter' f alist = (filter f alist, filter (not . f) alist)
 
 numRanks :: Int
 numRanks = numDecks * 4
-
--- powerset :: [a] -> [[a]]
--- powerset [] = [[]]
--- powerset (x:xs) = (x:) <$> (((x:) <$> powerset xs) ++ powerset xs)
 
 
 
