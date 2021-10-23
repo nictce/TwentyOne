@@ -129,7 +129,7 @@ playHand upcard hand memo
         dhand = handCalc [upcard]
         tree = makeTree (5 - length hand) Combo (deckState memo) hand
         diff = p - d
-        treeprob = jointProbLeaves Charlie tree + jointProbLeaves (Value 21) tree
+        treeprob = jointProbEq Charlie tree + jointProbEq (Value 21) tree
 
 {---------------------------------
 Deck Statistics
@@ -311,25 +311,25 @@ rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
 
 sumTree :: Tree Load -> Double
 sumTree (Node a []) = prob a -- only take probabilities at the leaves
-sumTree (Node _ trees) = sum (sumTree <$> trees) -- + (if total a /= Value 0 then prob a else 1 - prob a) 
+sumTree (Node _ trees) = sum (sumTree <$> trees)
 
--- valTree :: HandValue -> Tree Load -> Double
--- valTree val (Node a trees) = if total a == val then prob a else sum (valTree val <$> trees)
+-- finds probability of val at every node of the tree
+-- jointProbEq :: HandValue -> Tree Load -> Double
+-- jointProbEq val (Node a trees)
+--     | total a == val = prob a
+--     | otherwise = sum (jointProbEq val <$> trees)
 
-jointProbEq :: HandValue -> Tree Load -> Double
-jointProbEq val (Node a trees)
-    | total a == val = prob a
-    | otherwise = sum (jointProbEq val <$> trees)
-
+-- finds probability less than val at every leaf (at any level) of the tree
 jointProbLt :: HandValue -> Tree Load -> Double
-jointProbLt val (Node a trees)
-    | total a < val && len a == 0 = prob a
-    | otherwise = sum (jointProbLt val <$> trees)
+jointProbLt val (Node a []) = if total a < val then prob a else 0
+jointProbLt val (Node _ trees) = sum (jointProbLt val <$> trees)
 
-jointProbLeaves :: HandValue -> Tree Load -> Double
-jointProbLeaves val (Node a []) = if total a == val then prob a else 0
-jointProbLeaves val (Node _ trees) = sum (jointProbLeaves val <$> trees)
+-- finds probability equal to val at every leaf (at any level) of the tree
+jointProbEq :: HandValue -> Tree Load -> Double
+jointProbEq val (Node a []) = if total a == val then prob a else 0
+jointProbEq val (Node _ trees) = sum (jointProbEq val <$> trees)
 
+-- finds probability equal to val at every leaf (at the bottom level) of the tree
 jointProbBottom :: HandValue -> Tree Load -> Double
 jointProbBottom val (Node a []) = if total a == val && len a == 0 then prob a else 0
 jointProbBottom val (Node _ trees) = sum (jointProbBottom val <$> trees)
