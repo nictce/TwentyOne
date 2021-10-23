@@ -105,8 +105,8 @@ Bidding
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
-    | pbust < 3/10 = Bid maxBid
-    | pbust < 5/10 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
+    | trace ("bid safe " ++ show psafe) pbust > 1/3 = Bid maxBid
+    | pbust < 1/2 = Bid $ min ((maxBid + minBid) `div` 2) $ getPoint pid points
     | otherwise = Bid minBid
     -- | combo > 1/3 = Bid maxBid
     -- | p > 1/3 = Bid maxBid -- Bid $ max (maxBid * 2 `div` 3) minBid -- $ (maxBid + minBid) `div` 2
@@ -116,8 +116,8 @@ makeBid pid points memo
         p = probValueBelow 8 deckState_
         combo = probValue 1 deckState_ * probValue 10 deckState_
         deckState_ = deckState memo
-        ptree = makeTree 1 Combo (deckState memo) []
-        pbust = jointProbEq Bust ptree
+        ptree = makeTree 2 Combo (deckState memo) []
+        pbust = jointProbEq Bust ptree -- this is always 0
         p17 = jointProbLt (Value 18) ptree
         psafe = 1 - pbust - p17
 
@@ -135,23 +135,23 @@ decideAction upcard hand memo = case take 2 $ lastActions memo of
     [Bid _] -> case upcard of
         Card _ Ace -> if probValue 10 (deckState memo) > 2/3
             then Insurance (max minBid $ currBid memo)
-            else decide2Cards upcard hand memo
-        _ -> decide2Cards upcard hand memo
+            else doubleOrSplit upcard hand memo
+        _ -> doubleOrSplit upcard hand memo
     [DoubleDown _, _] -> Hit
     [Hit, DoubleDown _] -> Stand
-    _ -> playHand upcard hand memo
+    _ -> doubleOrSplit upcard hand memo
 
-decide2Cards :: Card -> [Card] -> Memory -> Action
-decide2Cards upcard hand memo
-    | length hand /= 2 = playHand upcard hand memo
+doubleOrSplit :: Card -> [Card] -> Memory -> Action
+doubleOrSplit upcard hand memo
+    | length hand /= 2 = hitOrStand upcard hand memo
 
     -- Double
-    | psafe > 3/10 || handValue hand == Value 11 = DoubleDown bid
+    | psafe > 1/3 || handValue hand == Value 11 = DoubleDown bid
     -- Split
     | getRank (head hand) == getRank (last hand) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
     
-    | otherwise = playHand upcard hand memo
+    | otherwise = hitOrStand upcard hand memo
         where 
             bid = max minBid $ currBid memo
             ptree = makeTree 1 Combo (deckState memo) hand
@@ -160,11 +160,11 @@ decide2Cards upcard hand memo
             psafe = 1 - pbust - p17
 
 -- Hit Stand DoubleDown Split
-playHand :: Card -> [Card] -> Memory -> Action
-playHand upcard hand memo
+hitOrStand :: Card -> [Card] -> Memory -> Action
+hitOrStand upcard hand memo
     | phand < Value 11 = Hit
-    | trace ("" ++ show pbust) pbust >= 1/2 = Stand --
-    | psafe > 3/10 = Hit
+    | trace ("bid bust " ++ show pbust) pbust >= 1/2 = Stand --
+    | psafe > 1/3 = Hit
     -- | psafe > 1/2 && length hand == 2 = DoubleDown $ currBid memo
     -- | psafe > 1/3 = Hit
     -- | dsafe < 1/3 && phand >= Value 19 && phand > dhand = Stand
