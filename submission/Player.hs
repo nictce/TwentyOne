@@ -137,7 +137,7 @@ decide2nd upcard hand memo
     | getRank (head hand) == getRank (head (tail hand)) &&
       (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
     -- Insurance -- must 1/2 or put bid??
-    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2.0/3.0
+    | getRank upcard == Ace = if probValue 10 (deckState memo) > 2/3
         then Insurance bid
         else playHand upcard hand memo
 
@@ -379,7 +379,8 @@ parseCardFreq :: Parser CardFreq
 parseCardFreq = do
     r <- parseRank
     _ <- stringTok ":"
-    CardFreq r <$> parseInt
+    f <- parseInt
+    pure $ CardFreq r f
 
 parseAction_ :: Parser Action
 parseAction_ =  (stringTok "Hit" >> pure Hit) |||
@@ -439,9 +440,10 @@ sepby p1 p2 = sepby1 p1 p2 ||| pure []
 
 sepby1 :: Parser a -> Parser s -> Parser [a]
 sepby1 a s = do
-        x <- a
-        xs <- list $ s >> a
-        pure (x:xs)
+    x <- a
+    xs <- list $ s >> a
+    pure (x:xs)
+
 
 
 {---------------------------------
