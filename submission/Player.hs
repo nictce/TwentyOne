@@ -121,7 +121,7 @@ makeBid pid points memo
     | psafe > 3/10 = adjustBid $ max minBid $ min abv ((maxBid + minBid) `div` 2)
     | otherwise = adjustBid minBid
     where
-        adjustBid = Bid . validBid pid points 
+        adjustBid = Bid . validBid pid points
         ptree = makeTree 2 Combo memo []
         pbust = jointProbEq Bust ptree -- this is always 0
         pLt18 = jointProbLt (Value 18) ptree
@@ -132,7 +132,7 @@ makeBid pid points memo
 
 determineBidBounds :: PlayerId -> [PlayerPoints] -> (Points, Points)
 determineBidBounds pid points = (point - blw, abv - point)
-    where 
+    where
         sortedPoints = sort points
         point = getPoint pid points
         abv = _playerPoints $ foldr1 (\v a -> if _playerPoints v > point && v < a then v else a) sortedPoints
@@ -176,20 +176,32 @@ decideAction upcard hand pid points memo = case take 2 $ lastActions memo of
 doubleOrSplit :: Card -> [Card] -> PlayerId -> [PlayerPoints] -> Memory -> Action
 doubleOrSplit upcard hand pid points memo
     | length hand /= 2 = hitOrStand upcard hand memo
+    
+    -- Split
+    | canSplit hand && (headRank == Ace || headRank == Eight) = Split bid
+    | canSplit hand && headRank <= Seven = if headRank >= upRank && upRank /= Ace then Split bid else Hit
 
     -- Double
-    | psafe > 1/3 || handValue hand == Value 11 = DoubleDown bid
-    -- Split
-    | getRank (head hand) == getRank (last hand) &&
-      (getRank (head hand) == Ace || getRank (head hand) == Eight) = Split bid
-    
+    | handVal == Value 11 = DoubleDown bid -- 
+    | psafe > 1/3 && handVal > Value 11 = DoubleDown bid
+    | hasAce hand && handVal <= Value 17 = if upRank >= Four && upRank <= Six then DoubleDown bid else Hit
+
     | otherwise = hitOrStand upcard hand memo
-        where 
+        where
             bid = validBid pid points $ currBid memo
             ptree = makeTree 1 Combo memo hand
             pbust = jointProbEq Bust ptree
             pLt18 = jointProbLt (Value 18) ptree
             psafe = 1 - pbust - pLt18
+            headRank = getRank $ head hand
+            handVal = handValue hand
+            upRank = getRank upcard
+
+canSplit :: [Card] -> Bool
+canSplit hand = length hand == 2 && getRank (head hand) == getRank (last hand)
+
+hasAce :: [Card] -> Bool
+hasAce = any ((== Ace) . getRank)
 
 -- Hit Stand DoubleDown Split
 hitOrStand :: Card -> [Card] -> Memory -> Action
@@ -197,6 +209,7 @@ hitOrStand upcard hand memo
     -- | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
     | handValue hand <= Value 11 = Hit
     -- | handValue hand <= Value 14 && pbust <= 2/3 = Hit
+    -- | pbust <= 2/3 = Hit
     | pbust <= 1/2 = Hit
     | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
@@ -215,7 +228,7 @@ Memory Maintainance
 deserialise :: Maybe String -> Memory
 deserialise memo = case parse parseMemory <$> memo of
     Just (Result _ m) -> m
-    _ -> initMemory 
+    _ -> initMemory
 
 updateMemoryInfo :: Maybe Card -> PlayerId -> [PlayerInfo] -> [Card] -> Memory -> Memory
 updateMemoryInfo upcard pid info hand oldMemo =
@@ -243,7 +256,7 @@ checkDeck deckState = if all ((0 ==) . freq) deckState || any ((0 >) . freq) dec
     map (\ v -> CardFreq (rank v) (freq v + numRanks)) deckState else deckState
 
 dealerHiddenCard :: [PlayerInfo] -> Maybe Card -> Int
-dealerHiddenCard info upcard = case upcard of 
+dealerHiddenCard info upcard = case upcard of
     Nothing -> if null dealerList then 0 else 1
     _ -> 0
     where dealerList = filter (\d -> _playerInfoId d == dealerId && length (playerInfoHand d) == 1) info
@@ -292,7 +305,7 @@ makeTree_ 0 _ prob' memo hand = Node (L 0 newTotal newProb hand) []
         newTotal = handValue hand
         newProb = jointProb prob' hand (deckState memo) (hiddenCard memo)
 makeTree_ n maxVal prob' memo hand = Node (L n newTotal newProb hand) $
-    if terminal then [] 
+    if terminal then []
     else makeTree_ (n-1) maxVal newProb (memo {deckState = newDeckState}) <$> newHands
     where
         newTotal = handValue hand
