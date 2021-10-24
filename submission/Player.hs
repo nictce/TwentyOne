@@ -176,15 +176,15 @@ decideAction upcard hand pid points memo = case take 2 $ lastActions memo of
 doubleOrSplit :: Card -> [Card] -> PlayerId -> [PlayerPoints] -> Memory -> Action
 doubleOrSplit upcard hand pid points memo
     | length hand /= 2 = hitOrStand upcard hand memo
-    
+
     -- Split
     | canSplit hand && (headRank == Ace || headRank == Eight) = Split bid
     | canSplit hand && headRank <= Seven = if headRank >= upRank && upRank /= Ace then Split bid else Hit
 
     -- Double
     | handVal == Value 11 = DoubleDown bid -- 
-    | psafe > 1/3 && handVal > Value 11 = DoubleDown bid
     | hasAce hand && handVal <= Value 17 = if upRank >= Four && upRank <= Six then DoubleDown bid else Hit
+    | psafe > 1/3 && handVal > Value 11 = DoubleDown bid
 
     | otherwise = hitOrStand upcard hand memo
         where
@@ -267,7 +267,7 @@ getNewCards pid upcard info hand memo = let
     in case upcard of
         -- first turn (always remove dealer's previous upcard)
         Nothing -> removeDealerUpcard (lastUpcard memo) . concat $ (playerInfoHand <$>) $ if lastAction == Hit then
-            -- take player head if they hit (took a card) last round
+            -- take only player head if they hit (took a card) last round
             includePlayerHead pid info else
             -- else dont include the player at all
             filter ((pid /=) . _playerInfoId) info
@@ -276,7 +276,8 @@ getNewCards pid upcard info hand memo = let
             -- second turn    !!! TODO: removes dealers hand - bug?
             Bid _ -> [c] ++ concat (playerInfoHand <$> filter ((dealerId /=) . _playerInfoId) info) ++ hand
             -- >= second turn
-            _ -> [head hand]
+            Hit -> [head hand]
+            _ -> []
 
 removeDealerUpcard :: Maybe Card -> [Card] -> [Card]
 removeDealerUpcard upcard cards = case upcard of
