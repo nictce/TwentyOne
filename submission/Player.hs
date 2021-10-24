@@ -117,9 +117,11 @@ makeBid pid points memo
 -- bid safe borders at 0.3, bid safe' borders at 0.4
     -- | trace ("bid safe " ++ show psafe ++ "\tbid safe' " ++ show psafe') False = Bid maxBid
     -- | trace ("blw: " ++ show blw ++ "\tabv: " ++ show abv) False = undefined
+    | top3 = Bid minBid
     | psafe > 4/10 = adjustBid $ min maxBid $ max blw maxBid
     | psafe > 3/10 = adjustBid $ max minBid $ min abv ((maxBid + minBid) `div` 2)
     | otherwise = adjustBid minBid
+    -- | otherwise = adjustBid minBid
     where
         adjustBid = Bid . validBid pid points
         ptree = makeTree 2 Combo memo []
@@ -129,6 +131,8 @@ makeBid pid points memo
         pLt8 = jointProbLt (Value 8) ptree
         psafe = 1 - pbust - pLt18 + pLt12 - pLt8
         (blw, abv) = determineBidBounds pid points
+        sortedPoints = reverse $ sort points
+        top3 = not . null $ filter ((==pid) . _playerPointsId) $ take 3 sortedPoints
 
 determineBidBounds :: PlayerId -> [PlayerPoints] -> (Points, Points)
 determineBidBounds pid points = (point - blw, abv - point)
