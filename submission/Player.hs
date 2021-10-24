@@ -3,19 +3,21 @@
 
 module Player where
 
+import Data.List
+import Data.Char
+
 import           Parser.Parser      -- This is the source for the parser from the course notes
+import Parser.Instances
+
 import           Cards              -- Finally, the generic card type(s)
 
 import           TwentyOne.Types    -- Here you will find types used in the game of TwentyOne
 import           TwentyOne.Rules    -- Rules of the game
+import TwentyOne.Play
 
 -- You can add more imports if you need them
 -- import Debug.Trace
-import Data.List
-import Parser.Instances
-import Data.Char
-import TwentyOne.Play (dealerId)
-import TwentyOne.Types (PlayerPoints(PlayerPoints))
+-- import TwentyOne.Types
 
 
 
@@ -52,7 +54,7 @@ instance Show CardFreq where
 -- instance Functor CardFreq where
 --     fmap f (CardFreq rank freq) = CardFreq rank $ f freq
 
-data Tree a = Node a [Tree a] -- | Leaf a 
+data Tree a = Node a [Tree a] 
     deriving (Show)
 
 data Load = L {
@@ -92,19 +94,14 @@ playCard
 
 -- | This function is called once it's your turn, and keeps getting called until your turn ends.
 playCard :: PlayFunc
-playCard upcard points info pid memo hand
-    -- | traceIf (pid == "0") ("\n======================================\n" ++ "id: " ++ show pid ++ " upcard: " ++ show upcard) False = undefined
-    -- | traceIf (pid == "0") ("info: " ++ show info ++ " hand: " ++ show hand) False = undefined
-    -- | traceIf (pid == "0") ("memo: " ++ show memo) False = undefined
-
-    -- | otherwise
-    = let
+playCard upcard points info pid memo hand = (action, show finalMemo)
+    where
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
             Nothing -> makeBid pid points newMemo
             Just c -> decideAction c hand pid points newMemo
         finalMemo = updateMemoryAction action newMemo
-    in (action, show finalMemo)
+    
 
 
 
@@ -114,25 +111,23 @@ Bidding
 
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
--- bid safe borders at 0.3, bid safe' borders at 0.4
-    -- | trace ("bid safe " ++ show psafe ++ "\tbid safe' " ++ show psafe') False = Bid maxBid
-    -- | trace ("blw: " ++ show blw ++ "\tabv: " ++ show abv) False = undefined
-    | top3 = Bid minBid
     | psafe > 4/10 = adjustBid $ min maxBid $ max blw maxBid
     | psafe > 3/10 = adjustBid $ max minBid $ min abv ((maxBid + minBid) `div` 2)
     | otherwise = adjustBid minBid
-    -- | otherwise = adjustBid minBid
     where
         adjustBid = Bid . validBid pid points
         ptree = makeTree 2 Combo memo []
-        pbust = jointProbEq Bust ptree -- this is always 0
-        pLt18 = jointProbLt (Value 18) ptree
-        pLt12 = jointProbLt (Value 12) ptree
-        pLt8 = jointProbLt (Value 8) ptree
-        psafe = 1 - pbust - pLt18 + pLt12 - pLt8
+        psafe = 1 - jointProbEq Bust ptree - jointProbLt (Value 18) ptree + 
+            jointProbLt (Value 12) ptree - jointProbLt (Value 8) ptree
         (blw, abv) = determineBidBounds pid points
-        sortedPoints = reverse $ sort points
-        top3 = not . null $ filter ((==pid) . _playerPointsId) $ take 3 sortedPoints
+
+validBid :: PlayerId -> [PlayerPoints] -> Points -> Points
+validBid pid points bid
+    | pts < minBid = pts
+    | pts > maxBid = min maxBid bid
+    | bid > pts = pts
+    | otherwise = bid
+    where pts = getPoint pid points
 
 determineBidBounds :: PlayerId -> [PlayerPoints] -> (Points, Points)
 determineBidBounds pid points = (point - blw, abv - point)
@@ -142,19 +137,8 @@ determineBidBounds pid points = (point - blw, abv - point)
         abv = _playerPoints $ foldr1 (\v a -> if _playerPoints v > point && v < a then v else a) sortedPoints
         blw = _playerPoints $ foldl1 (\a v -> if _playerPoints v < point && v > a then v else a) sortedPoints
 
--- [PlayerPoints "0" 7, PlayerPoints "1" 8, PlayerPoints "2" 2, PlayerPoints "9" 7, PlayerPoints "8" 4, PlayerPoints "3" 0]
--- [PlayerPoints "0" 7, PlayerPoints "1" 7, PlayerPoints "2" 7, PlayerPoints "9" 7, PlayerPoints "8" 7, PlayerPoints "3" 7]
-
 getPoint :: PlayerId -> [PlayerPoints] -> Points
 getPoint pid points = _playerPoints $ head $ filter ((pid ==) . _playerPointsId) points
-
-validBid :: PlayerId -> [PlayerPoints] -> Points -> Points
-validBid pid points bid
-    | pts < minBid = pts
-    | pts > maxBid = min maxBid bid
-    | bid > pts = pts
-    | otherwise = bid
-    where pts = getPoint pid points
 
 
 
@@ -207,14 +191,11 @@ canSplit hand = length hand == 2 && getRank (head hand) == getRank (last hand)
 hasAce :: [Card] -> Bool
 hasAce = any ((== Ace) . getRank)
 
--- Hit Stand DoubleDown Split
 hitOrStand :: Card -> [Card] -> Memory -> Action
 hitOrStand upcard hand memo
-    -- | trace ("psafe " ++ show psafe ++ "\tdsafe " ++ show dsafe) False = Stand
     | handValue hand <= Value 11 = Hit
-    -- | handValue hand <= Value 14 && pbust <= 2/3 = Hit
-    -- | pbust <= 2/3 = Hit
     | pbust <= 1/2 = Hit
+    -- | handValue hand <= Value 14 && pbust <= 2/3 = Hit -- should i add this in
     | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
     where
@@ -243,11 +224,6 @@ updateMemoryInfo upcard pid info hand oldMemo =
     }
     where newCards = getNewCards pid upcard info hand oldMemo
 
-updateMemoryAction :: Action -> Memory -> Memory
-updateMemoryAction action oldMemo = case action of
-    Bid amt -> oldMemo {currBid = amt, lastActions = [action]}
-    _ -> oldMemo {lastActions = action : lastActions oldMemo}
-
 updateDeckState :: [Card] -> [CardFreq] -> [CardFreq]
 updateDeckState newCards memo = checkDeck (foldr (map . updateFreq) memo newCards)
     where updateFreq card cardFreq
@@ -270,16 +246,17 @@ getNewCards pid upcard info hand memo = let
     lastAction = head (lastActions memo)
     in case upcard of
         -- first turn (always remove dealer's previous upcard)
-        Nothing -> removeDealerUpcard (lastUpcard memo) . concat $ (playerInfoHand <$>) $ if lastAction == Hit then
-            -- take only player head if they hit (took a card) last round
-            includePlayerHead pid info else
-            -- else dont include the player at all
-            filter ((pid /=) . _playerInfoId) info
+        Nothing -> removeDealerUpcard (lastUpcard memo) . concat $ (playerInfoHand <$>) $ 
+            if lastAction == Hit then
+                -- take only player head if they hit (drew a card) last round
+                includePlayerHead pid info else
+                -- else dont include the player at all
+                filter ((pid /=) . _playerInfoId) info
 
         Just c -> case lastAction of
-            -- second turn    !!! TODO: removes dealers hand - bug?
+            -- second turn
             Bid _ -> [c] ++ concat (playerInfoHand <$> filter ((dealerId /=) . _playerInfoId) info) ++ hand
-            -- >= second turn
+            -- any subsequent turns
             Hit -> [head hand]
             _ -> []
 
@@ -292,6 +269,11 @@ includePlayerHead :: PlayerId -> [PlayerInfo] -> [PlayerInfo]
 includePlayerHead pid info = let
     (hands, phand) = filter' ((pid /=) . _playerInfoId) info in
     hands ++ [PlayerInfo pid [head (playerInfoHand (head phand))]]
+
+updateMemoryAction :: Action -> Memory -> Memory
+updateMemoryAction action oldMemo = case action of
+    Bid amt -> oldMemo {currBid = amt, lastActions = [action]}
+    _ -> oldMemo {lastActions = action : lastActions oldMemo}
 
 
 
@@ -326,7 +308,7 @@ jointProb _ [] _ _ = 1.0 -- base probability starts from 1
 jointProb prob' hand deckState hiddenCard = fromIntegral numOfRank / fromIntegral (totalCards deckState + hiddenCard) * prob'
     where
         rank' = getRank (head hand)
-        numOfRank = rankEq rank' deckState
+        numOfRank = getRankFreq rank' deckState
 
 possHands :: [CardFreq] -> [Card] -> [[Card]]
 possHands deckState hand = (:hand) <$> (Card Spade <$> availableRanks)
@@ -351,8 +333,8 @@ jointProbBottom :: HandValue -> Tree Load -> Double
 jointProbBottom val (Node a []) = if total a == val && len a == 0 then prob a else 0
 jointProbBottom val (Node _ trees) = sum (jointProbBottom val <$> trees)
 
-rankEq :: Rank -> [CardFreq] -> Int
-rankEq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
+getRankFreq :: Rank -> [CardFreq] -> Int
+getRankFreq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
 
 totalCards :: [CardFreq] -> Int
 totalCards = foldr (\v a -> a + freq v) 0
