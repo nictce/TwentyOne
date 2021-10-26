@@ -90,16 +90,6 @@ instance Eq PlayerPoints where
 instance Ord PlayerPoints where
     (PlayerPoints _ p1) `compare` (PlayerPoints _ p2) = p1 `compare` p2
 
--- instance Functor CardFreq where
---     fmap f (CardFreq rank freq) = CardFreq rank $ f freq
-
--- instance Foldable Tree where
---     foldMap f (Node a []) = f a
---     foldMap f (Node a trees) = [f a] ++ (concat (foldMap f <$> trees))
-
--- instance Functor Load where
---     fmap f l = f $ prob l
-
 
 
 {-------------------------------------------------------------------------------
@@ -181,14 +171,14 @@ parseCardFreq = do
 -- Parses an Action.
 parseAction_ :: Parser Action
 parseAction_ =  parseShow [Hit, Stand] |||
-    (stringTok "DoubleDown " >> parseInt >>= pure . DoubleDown) |||
-    (stringTok "Split " >> parseInt >>= pure . Split) |||
-    (stringTok "Bid " >> parseInt >>= pure . Bid) |||
-    (stringTok "Insurance " >> parseInt >>= pure . Insurance)
+    (stringTok "DoubleDown" >> parseInt >>= pure . DoubleDown) |||
+    (stringTok "Split" >> parseInt >>= pure . Split) |||
+    (stringTok "Bid" >> parseInt >>= pure . Bid) |||
+    (stringTok "Insurance" >> parseInt >>= pure . Insurance)
 
 -- Parses a Card wrapped in a Maybe context, or a Nothing.
 parseMaybeCard :: Parser (Maybe Card)
-parseMaybeCard = (stringTok "Just " >> pure <$> parseCard) ||| 
+parseMaybeCard = (stringTok "Just" >> pure <$> parseCard) ||| 
     (stringTok "Nothing" >> pure Nothing)
 
 -- Parses a Card.
@@ -202,6 +192,50 @@ parseCard = do
 parseRank :: Parser Rank
 parseRank = parseShow [Ace ..]
 
+-- Returns a parser that continually parses a String and places the results in 
+-- a List. Inspired from Parser.hs in Tutorial 11. 
+list :: Parser a -> Parser [a]
+list p = list1 p ||| pure []
+    where list1 s = do
+            s' <- s
+            s'' <- list s
+            pure (s':s'')
+
+-- Parses any amount of spaces in a String. 
+-- Inspired from Parser.hs in Tutorial 11. 
+spaces :: Parser String
+spaces = list (satisfy isSpace)
+    where satisfy f = do
+            c <- character
+            (if f c then pure else unexpectedCharParser) c
+
+-- Applies the given parser and ignores any trailing whitespaces. 
+-- Inspired from Parser.hs in Tutorial 11. 
+tok :: Parser a -> Parser a
+tok p = do
+    r <- p
+    _ <- spaces
+    pure r
+
+-- Parses a comma and ignores any trailing whitespaces. 
+-- Inspired from Parser.hs in Tutorial 11. 
+commaTok :: Parser Char
+commaTok = tok (is ',')
+
+-- Parses the input string and ignores any trailing whitespaces. 
+-- Inspired from Parser.hs in Tutorial 11. 
+stringTok :: String -> Parser String
+stringTok = tok . string
+    where string = traverse is
+
+-- Parses a list of values from applying the first parser, separated by values 
+-- from the second parser. Inspired from Parser.hs in Tutorial 11. 
+sepby :: Parser a -> Parser s -> Parser [a]
+sepby p1 p2 = sepby1 p1 p2 ||| pure []
+    where sepby1 a s = do
+            x <- a
+            xs <- list $ s >> a
+            pure (x:xs)
 
 
 
@@ -240,7 +274,7 @@ updateDeckState newCards deckState = handleRefills (foldr (map . updateFreq) dec
 handleRefills :: [CardFreq] -> [CardFreq]
 handleRefills deckState = 
     if all ((0 ==) . freq) deckState || any ((0 >) . freq) deckState 
-        then map (\ v -> CardFreq (rank v) (freq v + numRanks)) deckState 
+        then map (\cf -> CardFreq (rank cf) (freq cf + numRanks)) deckState 
         else deckState
 
 -- Determines whether the dealer's hidden card was unplayed in the last round.
@@ -300,8 +334,8 @@ Bidding
 -- General Algorithm:
 -- 1. Find the ranking of the player among all players. 
 -- 2. If the probability of getting a good hand is:
---    - High: Bid with the difference against the player above you, so that if 
---      you win you have a chance of overtaking their rank. 
+--    - High: Bid with the maximum bid, so that if you win you have a chance of 
+--      overtaking the rank of the player above you. 
 --    - Moderate: Bid with the difference against the player below you, so that 
 --      if you lose, your rank won't drop too much, as the dealer likely won. 
 --    - Low: Bid with the minimum bid. 
@@ -312,34 +346,32 @@ Bidding
 -- The amount of the bid is based on the difference in points of adjacent ranks.
 makeBid :: PlayerId -> [PlayerPoints] -> Memory -> Action
 makeBid pid points memo
-    | psafe > 4/10 = adjustBid $ min maxBid $ max abv minBid -- maybe just change this to maxBid or blw || switch to above???
-    | psafe > 3/10 = adjustBid $ max minBid $ min blw ((maxBid + minBid) `div` 2)
+    | psafe > 4/10 = adjustBid maxBid
+    | psafe > 3/10 = adjustBid $ min blw ((maxBid + minBid) `div` 2)
     | otherwise = adjustBid minBid
     where
         adjustBid = Bid . validAmt pid points
         ptree = makeTree 2 Combo memo []
         psafe = 1 - jointProbEq Bust ptree - jointProbLt (Value 18) ptree + 
             jointProbLt (Value 12) ptree - jointProbLt (Value 8) ptree
-        (blw, abv) = determineBidBounds pid points
+        blw = bidLowerBound pid points
 
 -- Ensures that the amount being bid is valid, according to the player's points.
 validAmt :: PlayerId -> [PlayerPoints] -> Points -> Points
 validAmt pid points bid
     | pts < minBid = pts
-    | pts > maxBid = min maxBid bid
-    | bid > pts = pts
-    | otherwise = bid
+    | bid > pts && pts <= maxBid = pts
+    | otherwise = max minBid $ min maxBid bid
     where pts = getPoint pid points
 
 -- Determines the upper and lower bounds of points that the player should bid.
 -- We bid as much as the difference with the player below us and as low as the 
 -- difference with the player above us to minimise losses and maximise profit.
-determineBidBounds :: PlayerId -> [PlayerPoints] -> (Points, Points)
-determineBidBounds pid points = (point - blw, abv - point)
+bidLowerBound :: PlayerId -> [PlayerPoints] -> Points
+bidLowerBound pid points = point - blw
     where
         sortedPoints = sort points
         point = getPoint pid points
-        abv = _playerPoints $ foldr1 (\v a -> if _playerPoints v > point && v < a then v else a) sortedPoints
         blw = _playerPoints $ foldl1 (\a v -> if _playerPoints v < point && v > a then v else a) sortedPoints
 
 
@@ -376,7 +408,8 @@ decideAction upcard hand pid points memo = case take 2 $ lastActions memo of
         altAction = splitOrDouble upcard hand pid points memo
 
 -- Decides whether to Split or DoubleDown if the player has exactly 2 cards.
--- This incorporates some Basic Strategy with the use of Probability Trees.  
+-- This incorporates some Basic Strategy with the use of Probability Trees, 
+-- inspired by https://www.blackjackapprenticeship.com/blackjack-strategy-charts/.  
 splitOrDouble :: Card -> Hand -> PlayerId -> [PlayerPoints] -> Memory -> Action
 splitOrDouble upcard hand pid points memo
     | length hand /= 2 = hitOrStand upcard hand memo
@@ -412,7 +445,7 @@ hitOrStand :: Card -> Hand -> Memory -> Action
 hitOrStand upcard hand memo
     | handValue hand <= Value 11 = Hit
     | pbust <= 1/2 = Hit
-    -- (|) handValue hand <= Value 14 && pbust <= 2/3 = Hit -- should i add this in
+    -- (|) handValue hand <= Value 14 && pbust <= 3/5 = Hit
     | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
     where
@@ -432,8 +465,8 @@ Tree and Deck Statistics
 
 -- Makes a Probability Tree with configuration for height and a value constraint.
 makeTree :: Int -> HandValue -> Memory -> Hand -> Tree Load
-makeTree n maxVal memo hand = Node (L n (handValue hand) 1.0 hand) $
-    makeNodes (n-1) maxVal 1.0 memo <$> newHands
+makeTree n minVal memo hand = Node (L n (handValue hand) 1.0 hand) $
+    makeNodes (n-1) minVal 1.0 memo <$> newHands
     where newHands = findPossibleHands (deckState memo) hand
 
 -- The auxiliary function that creates each of the nodes within the Probability 
@@ -445,14 +478,14 @@ makeNodes 0 _ prob' memo hand = Node (L 0 newTotal newProb hand) []
         newTotal = handValue hand
         newProb = jointProb prob' hand (deckState memo) (unplayedCards memo)
 -- Creates all inner nodes of the tree. 
-makeNodes n maxVal prob' memo hand = Node (L n newTotal newProb hand) $
+makeNodes n minVal prob' memo hand = Node (L n newTotal newProb hand) $
     if terminal 
         then []
         -- Create new nodes for each possible card that can be drawn
-        else makeNodes (n-1) maxVal newProb (memo {deckState = newDeckState}) <$> newHands
+        else makeNodes (n-1) minVal newProb (memo {deckState = newDeckState}) <$> newHands
     where
         newTotal = handValue hand
-        terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie || newTotal >= maxVal
+        terminal = newTotal == Bust || newTotal == Combo || newTotal == Charlie || newTotal >= minVal
 
         oldDeckState = deckState memo
         -- Updates the deck state with the newest card from the current hand
@@ -541,82 +574,28 @@ getRankFreq rank' = foldr (\v a -> if rank v == rank' then a + freq v else a) 0
 totalCards :: [CardFreq] -> Int
 totalCards = foldr (\v a -> a + freq v) 0
 
--- traceIf :: Bool -> String -> p -> p
--- traceIf True  s x = trace s x
--- traceIf False _ x = x
-
-
-
-{-------------------------------------------------------------------------------
-Parser Utility
--------------------------------------------------------------------------------}
-
--- Returns a parser that continually parses a String and places the results in 
--- a List. Inspired from Parser.hs in Tutorial 11. 
-list :: Parser a -> Parser [a]
-list p = list1 p ||| pure []
-    where list1 s = do
-            s' <- s
-            s'' <- list s
-            pure (s':s'')
-
--- Parses any amount of spaces in a String. 
--- Inspired from Parser.hs in Tutorial 11. 
-spaces :: Parser String
-spaces = list (satisfy isSpace)
-    where satisfy f = do
-            c <- character
-            (if f c then pure else unexpectedCharParser) c
-
--- Applies the given parser and ignores any trailing whitespaces. 
--- Inspired from Parser.hs in Tutorial 11. 
-tok :: Parser a -> Parser a
-tok p = do
-    r <- p
-    _ <- spaces
-    pure r
-
--- Parses a comma and ignores any trailing whitespaces. 
--- Inspired from Parser.hs in Tutorial 11. 
-commaTok :: Parser Char
-commaTok = tok (is ',')
-
--- Parses the input string and ignores any trailing whitespaces. 
--- Inspired from Parser.hs in Tutorial 11. 
-stringTok :: String -> Parser String
-stringTok = tok . string
-    where string = traverse is
-
--- Parses a list of values from applying the first parser, separated by values 
--- from the second parser. Inspired from Parser.hs in Tutorial 11. 
-sepby :: Parser a -> Parser s -> Parser [a]
-sepby p1 p2 = sepby1 p1 p2 ||| pure []
-    where sepby1 a s = do
-            x <- a
-            xs <- list $ s >> a
-            pure (x:xs)
-
 
 
 {-------------------------------------------------------------------------------
 BNF CFG
 -------------------------------------------------------------------------------}
 
--- <memory> ::= <currBid> ";" <deckState> ";" <lastActions>
--- <currBid> ::= <int>
+-- <memory> ::= <int> "," <deckState> "," <lastActions> "," <lastUpcard> "," <int>
 -- <int> ::= <digit> | <digit><int>
--- <digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+-- <digit> ::= "0" | "1" | <twoToNine>
+-- <twoToNine> ::= "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+-- <empty> ::= ""
 
--- <deckState> ::= "[" <cardFreqs> "]"
+-- <deckState> ::= "[" <empty> "]" | "[" <cardFreqs> "]"
 -- <cardFreqs> ::= <cardFreq> | <cardFreq> "," <cardFreqs>
 -- <cardFreq> ::= <rank> ":" <int> 
 
--- <lastActions> ::= "[" <actions> "]"
+-- <lastActions> ::= "[" <empty> "]" | "[" <actions> "]"
 -- <actions> ::= <action> | <action> "," <actions>
--- <action> ::= "H" | "ST" | <doubleDown> | <split> | <bid> | <insurance>
--- <doubleDown> ::= "DD" <int>
--- <split> ::= "SP" <int>
--- <bid> ::= "B" <int>
--- <insurance> ::= "I" <int>
+-- <action> ::= "Hit" | "Stand" | "DoubleDown" <int> | "Split" <int> | "Bid" <int> | "Insurance" <int>
 
+-- <lastUpcard> ::= "Just" <card> | "Nothing"
+-- <card> ::= <suit> <rank>
+-- <suit> ::= "D" | "C" | "H" | "S"
+-- <rank> ::= "A" | <twoToNine> | "T" | "J" | "Q" | "K"
 
