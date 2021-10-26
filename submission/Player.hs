@@ -104,13 +104,13 @@ playCard
 -- 3. Update the memory with the chosen action.
 
 playCard :: PlayFunc
-playCard upcard points info pid memo hand = (action, finalMemo)
+playCard upcard points info pid memo hand = (action, show finalMemo)
     where
         newMemo = updateMemoryInfo upcard pid info hand $ deserialise memo
         action = case upcard of
             Nothing -> makeBid pid points newMemo
             Just c  -> decideAction c hand pid points newMemo
-        finalMemo = show $ updateMemoryAction action newMemo
+        finalMemo = updateMemoryAction action newMemo
 
 
 
@@ -307,9 +307,9 @@ getNewCards pid upcard info hand memo = let
 
 -- Removes a Card (in a Maybe context) from a Hand.
 removeCard :: Maybe Card -> Hand -> Hand
-removeCard upcard cards = case upcard of
-    (Just c) -> delete c cards
-    Nothing  -> cards
+removeCard card hand = case card of
+    (Just c) -> delete c hand
+    Nothing  -> hand
 
 -- Searches the player's info and only includes the head (the new card) while 
 -- discarding the rest.
@@ -445,7 +445,7 @@ hitOrStand :: Card -> Hand -> Memory -> Action
 hitOrStand upcard hand memo
     | handValue hand <= Value 11 = Hit
     | pbust <= 1/2 = Hit
-    -- (|) handValue hand <= Value 14 && pbust <= 3/5 = Hit
+    | handValue hand <= Value 14 && pbust <= 3/5 = Hit
     | dbust > 2/3 && dbust - pbust >= 1/5 = Hit
     | otherwise = Stand
     where
